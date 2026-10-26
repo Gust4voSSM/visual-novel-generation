@@ -1,0 +1,16 @@
+{
+  "name": "roteiro-spike-worker",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "tsx --env-file=.env src/index.ts",
+    "test": "tsx --env-file=.env test/correctness.ts",
+    "load": "tsx --env-file=.env test/load.ts"
+  },
+  "dependencies": {
+    "spacetimedb": "^2.13.0"
+  },
+  "devDependencies": {
+    "tsx": "^4.20.0"
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "name": "roteiro-spike",
+  "version": "1.0.0",
+  "main": "src/index.ts",
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "spacetimedb": "^2.13.0",
+    "typescript": "^7.0.2"
+  },
+  "type": "module"
+}

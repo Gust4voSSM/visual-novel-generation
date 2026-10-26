@@ -1,0 +1,34 @@
+/* Camada de tempo real do spike: presença, cursores, arrasto remoto, travas e rede. */
+.people{display:flex;align-items:center;gap:4px;pointer-events:auto;background:rgba(28,29,33,.92);box-shadow:inset 0 0 0 1px var(--line);border-radius:8px;padding:5px 10px 5px 6px}
+.pav{width:26px;height:26px;border-radius:50%;border:0;background:var(--pc);color:#111214;font-weight:600;font-size:12px;display:grid;place-items:center;box-shadow:0 0 0 2px var(--surface)}
+.pav.me{box-shadow:0 0 0 2px var(--surface),0 0 0 3.5px var(--pc)}
+.pav+.pav{margin-left:-6px}
+.pcount{margin-left:8px;color:var(--text-2);font-size:12.5px;white-space:nowrap}
+
+.chip.net{pointer-events:auto;font-family:var(--mono);font-size:12px}
+.chip.net .dim{color:var(--muted)}
+@media (max-width:600px){.chip.net .dim{display:none}}
+.ndot{width:8px;height:8px;border-radius:50%;background:var(--muted);flex:none}
+.chip.net.on .ndot{background:#4ade80;box-shadow:0 0 0 3px rgba(74,222,128,.18)}
+.chip.net.off .ndot,.chip.net.err .ndot{background:var(--red)}
+
+.netbanner{position:fixed;left:50%;top:12px;transform:translateX(-50%);z-index:80;background:var(--red-bg);color:#ffd9d9;box-shadow:0 0 0 1px #6b2b33,0 10px 24px rgba(0,0,0,.45);padding:8px 14px;border-radius:8px;font-size:13px}
+.app.offline #nodes{pointer-events:none}
+.app.offline #nodes .node{opacity:.8}
+
+/* nó arrastado por outra pessoa */
+.node.rdrag{box-shadow:inset 0 0 0 2px var(--rc),0 18px 40px rgba(0,0,0,.5);cursor:not-allowed;z-index:3}
+.node.rdrag::after{content:attr(data-who);position:absolute;left:10px;top:-22px;background:var(--rc);color:#111214;font-size:11.5px;font-weight:600;padding:2px 7px;border-radius:5px;pointer-events:none}
+
+/* cursores remotos (coordenadas do mundo; a escala é compensada no JS) */
+.rcursors{position:absolute;left:0;top:0;pointer-events:none;z-index:20}
+.rcursor{position:absolute;left:0;top:0;transform-origin:0 0;--cc:var(--amber)}
+.rcursor svg{width:16px;height:16px;display:block;fill:var(--cc);stroke:#111214;stroke-width:1.2;stroke-linejoin:round}
+.rcursor span{position:absolute;left:14px;top:14px;background:var(--cc);color:#111214;font-size:11.5px;font-weight:600;padding:2px 7px;border-radius:5px;white-space:nowrap}
+
+/* trava suave */
+.lockbadge{display:flex;align-items:center;gap:6px;font-size:11.5px;color:var(--lc);margin:4px 0}
+.lockbadge .ldot{width:7px;height:7px;border-radius:50%;background:var(--lc);animation:lockpulse 1.2s ease-in-out infinite}
+@keyframes lockpulse{50%{opacity:.35}}
+.locked{box-shadow:inset 0 0 0 1.5px var(--lc)!important;cursor:not-allowed;opacity:.85}
+@media (prefers-reduced-motion:reduce){.lockbadge .ldot{animation:none}}

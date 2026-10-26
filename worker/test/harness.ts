@@ -1,0 +1,76 @@
+// Clientes de teste: cada um é uma identidade anônima nova, como uma aba do editor.
+import { DbConnection } from '../src/module_bindings';
+
+export const URI = process.env.STDB_URI ?? 'ws://127.0.0.1:3000';
+export const DB = process.env.STDB_DB ?? 'roteiro-spike-ai';
+
+export type Client = { conn: DbConnection; name: string };
+
+export function connect(name: string, queries: string[], db = DB): Promise<Client> {
+  return new Promise((resolve, reject) => {
+    const conn = DbConnection.builder()
+      .withUri(URI)
+      .withDatabaseName(db)
+      .onConnect(c => {
+        c.subscriptionBuilder()
+          .onApplied(() => resolve({ conn: c, name }))
+          .onError((_ctx, err) => reject(err))
+          .subscribe(queries);
+      })
+      .onConnectError((_ctx, err) => reject(err))
+      .build();
+  });
+}
+
+export const EDITOR_QUERIES = [
+  'SELECT * FROM story', 'SELECT * FROM scene', 'SELECT * FROM choice',
+  'SELECT * FROM my_ai_job', 'SELECT * FROM my_chat_message', 'SELECT * FROM chat_chunk WHERE requester = :sender',
+];
+
+export const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
+export const uid = (p: string) => p + crypto.randomUUID().replace(/-/g, '').slice(0, 12);
+export const errCode = (e: unknown) => String((e as Error)?.message ?? e);
+
+export async function waitFor<T>(what: string, fn: () => T | undefined | null | false, timeoutMs = 15_000): Promise<T> {
+  const t0 = Date.now();
+  for (;;) {
+    const v = fn();
+    if (v) return v;
+    if (Date.now() - t0 > timeoutMs) throw new Error('tempo esgotado esperando: ' + what);
+    await sleep(10);
+  }
+}
+
+export function pct(a: number[], p: number) {
+  if (!a.length) return NaN;
+  const s = [...a].sort((x, y) => x - y);
+  return Math.round(s[Math.min(s.length - 1, Math.floor(p * s.length))]);
+}
+
+// História mínima com elenco fixo (no spike o elenco fica no cliente e vai no contexto).
+export const CONTEXT = {
+  characters: [
+    { id: 'cLia', name: 'Lia', desc: 'ruiva', sprites: [{ id: 'spL1', name: 'Neutro', desc: 'calma' }, { id: 'spL2', name: 'Feliz', desc: 'sorriso' }] },
+    { id: 'cDavi', name: 'Davi', desc: 'pescador', sprites: [{ id: 'spD1', name: 'Bravo', desc: 'franzido' }] },
+    { id: 'cCida', name: 'Cida', desc: 'grisalha', sprites: [{ id: 'spC1', name: 'Feliz', desc: 'acolhedor' }] },
+    { id: 'cSem', name: 'Sem sprite', desc: '', sprites: [] },
+  ],
+  backgrounds: [{ id: 'bPraia', name: 'Praia' }, { id: 'bFarol', name: 'Farol à noite' }],
+};
+
+export async function seedStory(c: Client) {
+  const ops = [
+    { op: 'upsert_scene', scene: { id: 't1', title: 'Início', x: 0, y: 0, bg: 'bPraia', chars: '[]', kind: 'narration', speaker: '', text: 'Começo.', next: '', ai: '' } },
+    { op: 'upsert_scene', scene: { id: 't2', title: 'Meio', x: 380, y: 0, bg: '', chars: '[]', kind: 'narration', speaker: '', text: 'Meio.', next: '', ai: '' } },
+    { op: 'upsert_choice', choice: { id: 'tc1', sceneId: 't1', label: 'Ir em frente', target: 't2', position: 0 } },
+    { op: 'upsert_choice', choice: { id: 'tc2', sceneId: 't1', label: 'Olhar o mar', target: '', position: 1 } },
+  ];
+  await c.conn.reducers.resetStory({ title: 'Teste IA', startScene: 't1', ops: JSON.stringify(ops) });
+}
+
+// Procedures devolvem {"ok": true, ...} ou {"error": "CÓDIGO"}.
+export async function proc<T = any>(p: Promise<string>): Promise<T> {
+  const r = JSON.parse(await p);
+  if (r.error) throw new Error(r.error + (r.detail ? ' ' + r.detail : ''));
+  return r;
+}
