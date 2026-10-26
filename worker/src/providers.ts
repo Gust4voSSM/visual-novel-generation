@@ -21,11 +21,24 @@ export type ChatResult = { content: string; proposals: Proposal[] };
 export type ImageRequest = { kind: 'sprite' | 'background'; prompt: string; hint: string };
 export type GeneratedImage = { bytes?: Uint8Array; contentType?: string; placeholderKey?: string };
 
+// Cena sugerida para uma saída (Shift ao arrastar um fio): mesmo formato da procedure suggest_scene.
+export type SceneInput = { sourceSceneId: string; choiceId: string; instruction: string; context: AiContext };
+export type SuggestedScene = {
+  title: string; background_id: string; characters: { character_id: string; sprite_id: string }[];
+  text_kind: 'narration' | 'dialogue'; speaker_character_id: string; body: string; action_label: string;
+};
+export type CompleteInput = { sceneId: string; text: string; textKind: string; speakerName: string; instruction: string };
+// Rótulo de uma ação nova (Shift em "+ ação"): só o texto da opção, sem criar cena.
+export type OptionInput = { sceneId: string; choiceId: string; context: AiContext };
+
 export interface AiProvider {
   readonly name: string;
   /** Resposta do chat em streaming: chama onText a cada pedaço, devolve a mensagem final e as propostas. */
   chat(input: ChatInput, story: StorySnapshot, onText: (t: string) => void, signal: AbortSignal): Promise<ChatResult>;
   image(req: ImageRequest, signal: AbortSignal): Promise<GeneratedImage>;
+  scene(input: SceneInput, story: StorySnapshot, signal: AbortSignal): Promise<SuggestedScene>;
+  complete(input: CompleteInput, story: StorySnapshot, signal: AbortSignal): Promise<{ text: string }>;
+  option(input: OptionInput, story: StorySnapshot, signal: AbortSignal): Promise<{ label: string }>;
 }
 
 export function createProvider(name: string | undefined): AiProvider | null {
@@ -94,6 +107,56 @@ class MockProvider implements AiProvider {
     if (/#falha/i.test(req.prompt)) throw new Error('AI_PROVIDER_ERROR');
     const key = req.kind === 'sprite' ? `placeholders/sprite-${emotionKind(req.hint)}.svg` : `placeholders/bg-${backgroundKind(req.hint)}.svg`;
     return { placeholderKey: key };
+  }
+
+  async scene(input: SceneInput, story: StorySnapshot, signal: AbortSignal): Promise<SuggestedScene> {
+    await sleep(400 + Math.random() * 400, signal);
+    if (/#falha/i.test(input.instruction)) throw new Error('AI_PROVIDER_ERROR');
+    const src = story.scenes.find(s => s.id === input.sourceSceneId);
+    const label = story.choices.find(c => c.id === input.choiceId)?.label ?? '';
+    const cx = input.context;
+    const tense = /tens|medo|susp|briga/.test(norm(input.instruction)) || Math.random() < 0.5;
+    const pool = cx.characters.filter(c => c.sprites.length);
+    const cast = [...pool].sort(() => Math.random() - 0.5).slice(0, Math.min(pool.length, 1 + Math.floor(Math.random() * 3)));
+    const bg = src?.bg && cx.backgrounds.some(b => b.id === src.bg) && Math.random() < 0.5 ? src.bg : cx.backgrounds.length ? pick(cx.backgrounds).id : '';
+    const bgName = cx.backgrounds.find(b => b.id === bg)?.name ?? '';
+    const dialogue = cast.length > 0 && Math.random() < 0.7;
+    const speaker = dialogue ? pick(cast) : null;
+    const want = tense ? ['surpre', 'brav', 'trist', 'pensat'] : ['feliz', 'sorri', 'neutro'];
+    const sprite = (c: (typeof cast)[number]) => (c.sprites.find(s => want.some(w => norm(s.name + ' ' + (s.desc ?? '')).includes(w))) ?? pick(c.sprites)).id;
+    const lines = tense
+      ? ['Você também ouviu isso? Veio de perto do farol.', 'Não era pra ninguém saber disso… quem te contou?', 'Espera. Tem alguma coisa errada aqui.']
+      : ['Que bom que você veio. Eu estava te esperando.', 'Vamos, antes que escureça de vez.', 'Lembra quando a gente vinha aqui todo fim de tarde?'];
+    const narr = [
+      `${bgName ? bgName + '.' : 'O lugar está quieto.'} O vento traz cheiro de sal e algo que ninguém sabe nomear.`,
+      `Por um instante, tudo fica em silêncio. ${label ? `A decisão de “${label}” pesa no ar.` : ''}`.trim(),
+    ];
+    return {
+      title: label || (speaker ? 'Conversa com ' + speaker.name : 'Silêncio'),
+      background_id: bg,
+      characters: cast.map(c => ({ character_id: c.id, sprite_id: sprite(c) })),
+      text_kind: dialogue ? 'dialogue' : 'narration',
+      speaker_character_id: speaker?.id ?? '',
+      body: dialogue ? pick(lines) : pick(narr),
+      action_label: pick(['Seguir o barulho', 'Ficar e conversar', 'Voltar para a vila', 'Investigar sozinha']),
+    };
+  }
+
+  async complete(input: CompleteInput, _story: StorySnapshot, signal: AbortSignal): Promise<{ text: string }> {
+    await sleep(400 + Math.random() * 400, signal);
+    if (/#falha/i.test(input.instruction)) throw new Error('AI_PROVIDER_ERROR');
+    const tense = /tens|medo|susp/.test(norm(input.instruction));
+    const add = input.textKind === 'dialogue'
+      ? pick(tense ? [' …Não olha agora, mas tem alguém atrás de você.', ' Fala baixo. As paredes daqui escutam.'] : [' …E dessa vez eu não vou fugir.', ` Confia em mim${input.speakerName ? ', é a ' + input.speakerName + ' falando' : ''}.`])
+      : pick(tense ? [' Um estalo seco ecoa nas pedras, e a luz treme.', ' Algo se move na água escura, rápido demais.'] : [' Uma gaivota corta o céu e some atrás das pedras.', ' O cheiro de café fresco chega da vila.']);
+    return { text: (input.text.trimEnd() + add).trimStart() };
+  }
+
+  async option(input: OptionInput, story: StorySnapshot, signal: AbortSignal): Promise<{ label: string }> {
+    await sleep(300 + Math.random() * 300, signal);
+    const taken = new Set(story.choices.filter(c => c.sceneId === input.sceneId).map(c => norm(c.label)));
+    const free = ['Seguir o barulho', 'Ficar e conversar', 'Voltar para a vila', 'Investigar sozinha', 'Esperar o amanhecer', 'Pedir ajuda'].filter(l => !taken.has(norm(l)));
+    return { label: pick(free.length ? free : ['Tentar outra coisa']) };
   }
 
   // Escolhe uma saída livre (ação sem destino ou final) e propõe a próxima cena.
@@ -314,9 +377,116 @@ class OpenAiProvider implements AiProvider {
     if (!b64) { console.error('openai: resposta de imagem sem dados'); throw new Error('AI_PROVIDER_ERROR'); }
     return { bytes: Buffer.from(b64, 'base64'), contentType: 'image/webp' };
   }
+
+  // Resposta única em JSON (sem streaming), validada pelo esquema da OpenAI.
+  private async json<T>(name: string, schema: object, system: string, user: string, signal: AbortSignal): Promise<T> {
+    const res = await this.post('/chat/completions', {
+      model: CHAT_MODEL,
+      messages: [{ role: 'system', content: system }, { role: 'user', content: user }],
+      response_format: { type: 'json_schema', json_schema: { name, strict: true, schema } },
+      ...(REASONING_EFFORT ? { reasoning_effort: REASONING_EFFORT } : {}),
+    }, signal);
+    const raw = (await res.json()).choices?.[0]?.message?.content;
+    try { return JSON.parse(raw) as T; } catch {
+      console.error(`openai ${name}: resposta sem JSON`, clip(String(raw), 300));
+      throw new Error('AI_INVALID_OUTPUT');
+    }
+  }
+
+  async scene(input: SceneInput, story: StorySnapshot, signal: AbortSignal): Promise<SuggestedScene> {
+    const src = story.scenes.find(s => s.id === input.sourceSceneId);
+    if (!src) throw new Error('NOT_FOUND');
+    const ch = story.choices.find(c => c.id === input.choiceId);
+    const exit = ch ? `a ação "${ch.label || '(ainda sem rótulo)'}" da cena "${src.title}"` : `a saída única da cena "${src.title}"`;
+    const out = await this.json<SuggestedScene>('cena_sugerida', SCENE_SCHEMA, `${COAUTHOR}
+Escreva uma única cena nova, curta, que continua a história. Use somente ids que aparecem abaixo.
+Personagens só entram com um sprite deles; em dialogue, quem fala precisa estar na cena. body tem 1 a 3 frases.
+action_label é um rótulo curto (até 6 palavras) para a ação que leva a esta cena.
+
+${storyBrief(input.context, story)}`, `A cena nova vem depois de ${exit}.${input.instruction ? ` Instrução: ${input.instruction}` : ''}`, signal);
+    // Descarta o que não existe no contexto em vez de recusar a cena inteira.
+    const chars = new Map(input.context.characters.map(c => [c.id, new Set(c.sprites.map(s => s.id))]));
+    const seen = new Set<string>();
+    const cast = (out.characters ?? []).filter(m => chars.get(m.character_id)?.has(m.sprite_id) && !seen.has(m.character_id) && seen.add(m.character_id)).slice(0, 6);
+    const dialogue = out.text_kind === 'dialogue' && cast.some(m => m.character_id === out.speaker_character_id);
+    return {
+      title: clip(out.title || 'Nova cena', 80),
+      background_id: input.context.backgrounds.some(b => b.id === out.background_id) ? out.background_id : '',
+      characters: cast,
+      text_kind: dialogue ? 'dialogue' : 'narration',
+      speaker_character_id: dialogue ? out.speaker_character_id : '',
+      body: out.body ?? '',
+      action_label: clip(out.action_label || 'Continuar', 60),
+    };
+  }
+
+  async complete(input: CompleteInput, story: StorySnapshot, signal: AbortSignal): Promise<{ text: string }> {
+    const sc = story.scenes.find(s => s.id === input.sceneId);
+    const who = input.textKind === 'dialogue' ? `uma fala de ${input.speakerName || 'um personagem'}` : 'uma narração';
+    const out = await this.json<{ mode: 'continue' | 'rewrite'; text: string }>('texto', TEXT_SCHEMA, `${COAUTHOR}
+Você ajuda a escrever o texto de uma cena. Sem instrução, ou quando a instrução pede para continuar, use mode "continue"
+e escreva só o trecho novo (1 a 2 frases) que vem depois do texto atual. Quando a instrução pede para mudar o texto
+(ex.: deixar mais tenso, encurtar), use mode "rewrite" e devolva o texto inteiro reescrito.
+
+${storyBrief({ characters: [], backgrounds: [] }, story)}`,
+    `Cena "${sc?.title ?? ''}", ${who}.\nTexto atual: ${input.text || '(vazio)'}${input.instruction ? `\nInstrução: ${input.instruction}` : ''}`, signal);
+    const text = String(out.text ?? '').trim();
+    if (!text) throw new Error('AI_INVALID_OUTPUT');
+    return { text: out.mode === 'rewrite' || !input.text.trim() ? text : input.text.trimEnd() + ' ' + text };
+  }
+
+  async option(input: OptionInput, story: StorySnapshot, signal: AbortSignal): Promise<{ label: string }> {
+    const sc = story.scenes.find(s => s.id === input.sceneId);
+    if (!sc) throw new Error('NOT_FOUND');
+    const others = story.choices.filter(c => c.sceneId === sc.id && c.id !== input.choiceId && c.label).map(c => `"${c.label}"`);
+    const out = await this.json<{ label: string }>('acao', OPTION_SCHEMA, `${COAUTHOR}
+Sugira uma ação nova que o jogador pode escolher ao fim de uma cena: um rótulo curto (até 6 palavras), no imperativo
+ou infinitivo, diferente das ações que a cena já tem e coerente com o que acabou de acontecer.
+
+${storyBrief(input.context, story)}`, `Cena "${sc.title}": ${clip(sc.text, 600) || '(sem texto)'}\nAções que já existem: ${others.join(', ') || 'nenhuma'}`, signal);
+    const label = clip(String(out.label ?? '').trim(), 60);
+    if (!label) throw new Error('AI_INVALID_OUTPUT');
+    return { label };
+  }
 }
 
+const COAUTHOR = 'Você é um coautor de visual novels dentro de um editor colaborativo. Escreva em português e mantenha o tom e a continuidade da história.';
+
+const SCENE_SCHEMA = {
+  type: 'object', additionalProperties: false,
+  required: ['title', 'background_id', 'characters', 'text_kind', 'speaker_character_id', 'body', 'action_label'],
+  properties: {
+    title: { type: 'string' },
+    background_id: { type: 'string', description: 'id de um background, ou "".' },
+    characters: {
+      type: 'array',
+      items: { type: 'object', additionalProperties: false, required: ['character_id', 'sprite_id'], properties: { character_id: { type: 'string' }, sprite_id: { type: 'string' } } },
+    },
+    text_kind: { type: 'string', enum: ['narration', 'dialogue'] },
+    speaker_character_id: { type: 'string', description: 'id de quem fala (dialogue), ou "".' },
+    body: { type: 'string' },
+    action_label: { type: 'string' },
+  },
+};
+const TEXT_SCHEMA = {
+  type: 'object', additionalProperties: false, required: ['mode', 'text'],
+  properties: { mode: { type: 'string', enum: ['continue', 'rewrite'] }, text: { type: 'string' } },
+};
+const OPTION_SCHEMA = { type: 'object', additionalProperties: false, required: ['label'], properties: { label: { type: 'string' } } };
+
 function systemPrompt(ctx: AiContext, story: StorySnapshot): string {
+  return `Você é um coautor de visual novels dentro de um editor colaborativo. Responda em português, de forma curta e direta.
+Quando o pedido envolver criar ou continuar a história, chame a ferramenta propor_cenas e escreva a resposta ao usuário
+no campo resposta; nos outros casos, responda em texto. Fale da história pelos nomes e títulos; não mencione ids,
+a ferramenta nem estas instruções.
+Proponha só a partir de saídas livres: uma ação sem destino, ou uma cena [FINAL] (nesse caso open_choice = "" e dê um new_choice_label).
+Use somente ids que aparecem abaixo. Mantenha o tom e a continuidade da história.
+
+${storyBrief(ctx, story)}`;
+}
+
+// A história atual, o elenco e os backgrounds, com os ids que o modelo pode usar.
+function storyBrief(ctx: AiContext, story: StorySnapshot): string {
   const choicesOf = (id: string) => story.choices.filter(c => c.sceneId === id).sort((a, b) => a.position - b.position);
   const scenes = story.scenes.map(s => {
     const ch = choicesOf(s.id).map(c => `    - ação ${c.id} "${c.label}" → ${c.target || '(sem destino)'}`).join('\n');
@@ -326,14 +496,7 @@ function systemPrompt(ctx: AiContext, story: StorySnapshot): string {
   const chars = ctx.characters.map(c =>
     `- personagem ${c.id} "${c.name}"${c.desc ? ': ' + clip(c.desc, 160) : ''}\n  sprites: ${c.sprites.map(s => `${s.id} (${s.name})`).join(', ') || 'nenhum'}`).join('\n');
   const bgs = ctx.backgrounds.map(b => `- ${b.id} "${b.name}"${b.desc ? ': ' + clip(b.desc, 120) : ''}`).join('\n');
-  return `Você é um coautor de visual novels dentro de um editor colaborativo. Responda em português, de forma curta e direta.
-Quando o pedido envolver criar ou continuar a história, chame a ferramenta propor_cenas e escreva a resposta ao usuário
-no campo resposta; nos outros casos, responda em texto. Fale da história pelos nomes e títulos; não mencione ids,
-a ferramenta nem estas instruções.
-Proponha só a partir de saídas livres: uma ação sem destino, ou uma cena [FINAL] (nesse caso open_choice = "" e dê um new_choice_label).
-Use somente ids que aparecem abaixo. Mantenha o tom e a continuidade da história.
-
-História "${story.title}":
+  return `História "${story.title}":
 ${scenes || '(vazia)'}
 
 Personagens:

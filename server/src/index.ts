@@ -367,7 +367,8 @@ export const sweep_locks = spacetimedb.reducer({ onSchedule: sweep }, { arg: swe
 });
 
 // ---------- IA: fila do worker ----------
-const AI_KINDS = new Set(['chat', 'character', 'background']);
+// scene, complete e option: cena sugerida, completar texto e rótulo de ação, pelo provedor real do worker.
+const AI_KINDS = new Set(['chat', 'character', 'background', 'scene', 'complete', 'option']);
 const MINUTE = 60_000_000n;
 const PROVIDER_TIMEOUT_MS = 30_000; // seção 2.6: cena sugerida e completar texto
 

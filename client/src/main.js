@@ -297,7 +297,7 @@ function drawDrag(now){let h='';let ghostHTML='',badgeHTML='';
       if(drag.moved)badgeHTML=`<div class="badge${drag.bad?' bad':sh&&!tgt?' shift':''}" style="left:${Math.round(drag.mx+18)}px;top:${Math.round(drag.my-52)}px">${sh&&!tgt?SPARK:''}${esc(txt)}</div>`;}}
   else if(drag&&drag.type==='cut'){if(Math.hypot(drag.x2-drag.x1,drag.y2-drag.y1)>4)h+=`<path d="M ${drag.x1.toFixed(1)} ${drag.y1.toFixed(1)} L ${drag.x2.toFixed(1)} ${drag.y2.toFixed(1)}" fill="none" stroke="#ff6b6b" stroke-width="2" stroke-dasharray="6 5" stroke-linecap="round"/>`;}
   else if(drag&&drag.type==='box'){const x=Math.min(drag.x1,drag.x2),y=Math.min(drag.y1,drag.y2),w=Math.abs(drag.x2-drag.x1),hh=Math.abs(drag.y2-drag.y1);if(w+hh>3)ghostHTML=`<div class="marquee" style="left:${x}px;top:${y}px;width:${w}px;height:${hh}px"></div>`;}
-  else if(hover){const p=hover.ch==='add'?null:outPos(hover.sid,hover.ch);const el=hover.el;if(el&&el.isConnected){const c=centerOf(el);const isAdd=hover.ch==='add';const txt=isAdd?(shiftOn?'Clique: a IA escreve a ação e a cena':'Clique · segure Shift para IA'):(shiftOn?'Clique ou arraste: a IA monta a cena':'Clique ou arraste · Shift = IA');badgeHTML=`<div class="badge${shiftOn?' shift':''}" style="left:${Math.round(isAdd?c.x-30:c.x+22)}px;top:${Math.round(isAdd?c.y-50:c.y-14)}px">${shiftOn?SPARK:''}${txt}</div>`;}}
+  else if(hover){const p=hover.ch==='add'?null:outPos(hover.sid,hover.ch);const el=hover.el;if(el&&el.isConnected){const c=centerOf(el);const isAdd=hover.ch==='add';const txt=isAdd?(shiftOn?'Clique: a IA escreve a ação':'Clique · segure Shift para IA'):(shiftOn?'Clique ou arraste: a IA monta a cena':'Clique ou arraste · Shift = IA');badgeHTML=`<div class="badge${shiftOn?' shift':''}" style="left:${Math.round(isAdd?c.x-30:c.x+22)}px;top:${Math.round(isAdd?c.y-50:c.y-14)}px">${shiftOn?SPARK:''}${txt}</div>`;}}
   dragEl.innerHTML=h;
   const tmp=fxEl.querySelector('.dyn')||Object.assign(document.createElement('div'),{className:'dyn'});if(!tmp.isConnected)fxEl.appendChild(tmp);tmp.innerHTML=ghostHTML+badgeHTML;
   $('#wash').classList.toggle('on',!!((drag&&drag.type==='wire'&&drag.ai)||(!drag&&hover&&shiftOn)));}
@@ -326,15 +326,15 @@ function createScene(src,ch,at,ai,opts={}){const sp=outPos(src.id,ch)||{x:src.x+
   if(!ai)expanded=ns.id;
   if(ai){ns.ai=true;ns.title='Gerando…';gens.set(ns.id,{full:'',i:0,comp:null,key,labelCh:opts.labelCh||null});lit.add(key);shake();}
   refresh();ensureVisible(ns.id);if(ai)runSuggest(ns.id,src.id,ch);return ns;}
-// A cena já existe para todos com ai = 'generating'; a procedure só devolve o conteúdo.
+// A cena já existe para todos com ai = 'generating'; o worker só devolve o conteúdo.
 function runSuggest(id,srcId,chId){const g=gens.get(id);
-  callProc('suggestScene',{sourceSceneId:srcId,choiceId:chId||'',instruction:'',newSceneId:id,context:JSON.stringify(aiContext())}).then(r=>{
+  aiJob('scene',{sourceSceneId:srcId,choiceId:chId||'',instruction:'',context:aiContext()}).then(o=>{
     if(gens.get(id)!==g)return; // apagada ou desfeita enquanto gerava
-    const o=r.scene;const chars=o.characters.filter(x=>spriteOf(charById(x.character_id),x.sprite_id)).map(x=>({c:x.character_id,s:x.sprite_id}));
+    const chars=o.characters.filter(x=>spriteOf(charById(x.character_id),x.sprite_id)).map(x=>({c:x.character_id,s:x.sprite_id}));
     const speaker=o.text_kind==='dialogue'&&chars.some(x=>x.c===o.speaker_character_id)?o.speaker_character_id:null;
     g.comp={title:o.title,bg:bgById(o.background_id)?o.background_id:null,chars,kind:speaker?'dialogue':'narration',speaker,text:o.body};g.full=o.body;
     const src=scene(srcId),ch=g.labelCh&&src&&src.choices.find(c=>c.id===g.labelCh);if(ch&&ch.gen)ch.gen.full=o.action_label;
-  },err=>{if(gens.get(id)!==g)return;genFailed(id,err);});}
+  }).catch(err=>{if(gens.get(id)!==g)return;genFailed(id,err);});} // catch: um erro ao aplicar também não pode deixar a cena presa
 function genFailed(id,err){const g=gens.get(id);gens.delete(id);const s=scene(id);if(g){lit.delete(g.key);}
   for(const t of state.scenes)for(const c of t.choices)if(c.gen&&!c.gen.full)delete c.gen; // a ação fica sem texto: o aviso pede um rótulo
   if(s){s.aiStatus='failed';s.ai=false;s.title='Nova cena';}refresh();toast('A IA não conseguiu montar a cena: '+aiMessage(err),'err');}
@@ -363,7 +363,7 @@ const IMG_BASE=import.meta.env.VITE_IMAGE_BASE||'/';
 const imgUrl=k=>/^(data:|https?:)/.test(k)?k:IMG_BASE+k;
 // No spike o elenco e os backgrounds ficam no cliente, então vão como contexto para a IA.
 function aiContext(){return{characters:state.characters.map(c=>({id:c.id,name:c.name,desc:c.desc,sprites:c.sprites.map(s=>({id:s.id,name:s.name,desc:s.desc}))})),backgrounds:state.backgrounds.map(b=>({id:b.id,name:b.name,desc:b.desc}))};}
-const AI_ERRS={AI_DISABLED:'a IA está desabilitada (sem chave configurada).',RATE_LIMITED:'limite de pedidos de IA por minuto atingido. Tente de novo em instantes.',AI_PROVIDER_ERROR:'o provedor de IA falhou. Tente de novo.',TIMEOUT:'o provedor demorou demais. Tente de novo.',AI_INVALID_OUTPUT:'a resposta da IA não respeitou as regras da cena.',WORKER_RESTARTED:'o serviço de IA reiniciou no meio do pedido. Tente de novo.',NOT_FOUND:'a cena de origem não existe mais.',INVALID:'pedido inválido.',OFFLINE:'sem conexão com o servidor.'};
+const AI_ERRS={AI_DISABLED:'a IA está desabilitada neste servidor.',RATE_LIMITED:'limite de pedidos de IA por minuto atingido. Tente de novo em instantes.',AI_PROVIDER_ERROR:'o provedor de IA falhou. Tente de novo.',TIMEOUT:'o provedor demorou demais. Tente de novo.',AI_INVALID_OUTPUT:'a resposta da IA não respeitou as regras da cena.',WORKER_RESTARTED:'o serviço de IA reiniciou no meio do pedido. Tente de novo.',NOT_FOUND:'a cena de origem não existe mais.',INVALID:'pedido inválido.',OFFLINE:'sem conexão com o servidor.'};
 function aiMessage(err){const m=String(err&&err.message||err);const c=Object.keys(AI_ERRS).find(k=>m.includes(k));return c?AI_ERRS[c]:m.slice(0,120);}
 // Procedures devolvem {ok, ...} ou {error}.
 async function callProc(name,args){if(!connected)throw new Error('OFFLINE');const r=JSON.parse(await conn.procedures[name](args));if(r.error)throw new Error(r.error);return r;}
@@ -371,6 +371,8 @@ async function callProc(name,args){if(!connected)throw new Error('OFFLINE');cons
 const jobWaiters=new Map;
 function requestAi(kind,input){const id=uid('j');return conn.reducers.requestAi({id,kind,input:JSON.stringify(input)}).then(()=>id);}
 function waitJob(id){const j=conn.db.myAiJob.id.find(id);if(j&&(j.status==='done'||j.status==='failed'))return Promise.resolve(j);return new Promise(res=>jobWaiters.set(id,res));}
+// Pedido de texto ao worker (cena, completar, ação): devolve o resultado já lido.
+const aiJob=(kind,input)=>requestAi(kind,input).then(waitJob).then(j=>{if(j.status!=='done')throw new Error(j.error);return JSON.parse(j.result);});
 function onJobRow(row){const w=jobWaiters.get(row.id);if(w&&(row.status==='done'||row.status==='failed')){jobWaiters.delete(row.id);w(row);}if(row.kind==='chat')chatJobChanged(row);}
 
 /* ---------- typing ticker (reference: 2 chars / 30ms) ---------- */
@@ -402,7 +404,10 @@ nodesEl.addEventListener('click',e=>{const b=e.target.closest('[data-act]');cons
   else if(a==='complete'){completeText(s);}
   else if(a==='retry'){retryGen(s);}});
 function addChoice(s,ai){pushUndo();const ch={id:uid('ch'),label:ai?'':'Nova ação',target:null};if(!s.choices.length&&s.next){ch.target=s.next;s.next=null;}s.choices.push(ch);freshRows.set('opt:'+ch.id,performance.now());
-  if(ai){ch.gen={full:'',i:0};refresh();const p=outPos(s.id,ch.id);if(p)burst(p.x,p.y,'ai mini');setTimeout(()=>{if(scene(s.id)&&s.choices.includes(ch))createScene(s,ch.id,null,true,{skipUndo:true,labelCh:ch.id});},260);}
+  // Shift: a IA escreve só o rótulo da ação; a cena seguinte fica por conta do autor.
+  if(ai){ch.gen={full:'',i:0};refresh();const p=outPos(s.id,ch.id);if(p)burst(p.x,p.y,'ai mini');
+    aiJob('option',{sceneId:s.id,choiceId:ch.id,context:aiContext()}).then(r=>{if(ch.gen)ch.gen.full=r.label;},err=>{
+      if(!ch.gen)return;delete ch.gen;if(!ch.label)ch.label='Nova ação';refresh();toast('A IA não conseguiu sugerir a ação: '+aiMessage(err),'err');});}
   else refresh();}
 nodesEl.addEventListener('pointerdown',e=>{if(e.pointerType!=='touch')return;heldAdd=false;const b=e.target.closest('[data-act="addchoice"]');if(!b)return;const n=b.closest('.node');const x0=e.clientX,y0=e.clientY;
   const stop=()=>{clearTimeout(holdTimer);b.classList.remove('holding');removeEventListener('pointerup',stop);removeEventListener('pointercancel',stop);removeEventListener('pointermove',mv);};
@@ -622,7 +627,7 @@ function completeText(s){if(gens.has(s.id))return;const prev=snapStr();const old
   const w=modal(`<div class="modal-head"><h2>Completar texto</h2><span class="tag ai">${SPARK}IA</span><button class="iconbtn" data-close aria-label="Fechar">${X}</button></div><div class="modal-body"><label class="field"><span class="lbl">instrução opcional</span><span class="row"><input class="inp" id="ctInstr" placeholder="ex.: deixar mais tenso" style="flex:1"><button class="btn sm" id="ctAgain">Gerar de novo</button></span></label><div class="field"><span class="lbl">sugestão</span><div class="suggest" id="ctSug"></div></div><div class="hint">O texto só é substituído se você aceitar.</div></div><div class="modal-foot"><button class="btn" data-close>Recusar</button><button class="btn violet solid" id="ctOk" disabled>Aceitar</button></div>`,'narrow ai-glow');
   const sug=w.querySelector('#ctSug'),ok=w.querySelector('#ctOk'),again=w.querySelector('#ctAgain');
   const gen=()=>{const my=++req;clearInterval(iv);result=null;ok.disabled=true;again.disabled=true;sug.innerHTML=`${esc(old)}<span class="add"></span><span class="spinner" style="margin-left:6px"></span>`;
-    callProc('completeText',{sceneId:s.id,text:old,textKind:s.kind,speakerName:s.kind==='dialogue'?(charById(s.speaker)?.name||''):'',instruction:w.querySelector('#ctInstr').value.trim()}).then(r=>{
+    aiJob('complete',{sceneId:s.id,text:old,textKind:s.kind,speakerName:s.kind==='dialogue'?(charById(s.speaker)?.name||''):'',instruction:w.querySelector('#ctInstr').value.trim()}).then(r=>{
       if(my!==req||!w.isConnected)return;again.disabled=false;result=r.text;
       // Continuação mostra só o trecho novo; reescrita mostra o texto inteiro.
       const cont=result.startsWith(old.trimEnd());const extra=cont?result.slice(old.trimEnd().length):result;

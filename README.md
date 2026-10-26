@@ -60,8 +60,9 @@ das procedures em `server/src/index.ts`.
 
 | Recurso | Caminho | Mock |
 |---|---|---|
-| Cena sugerida (Shift) | procedure `suggest_scene` | cena montada a partir do contexto (elenco, backgrounds) |
-| Completar texto | procedure `complete_text` | frase acrescentada; "tenso" na instrução muda o tom |
+| Cena sugerida (Shift ao arrastar um fio) | `request_ai` (`scene`) → worker → `ai_job.result` | cena montada a partir do contexto (elenco, backgrounds) |
+| Ação sugerida (Shift em "+ ação") | `request_ai` (`option`) → worker → `ai_job.result` | rótulo de uma lista fixa; só a ação, sem cena |
+| Completar texto | `request_ai` (`complete`) → worker → `ai_job.result` | frase acrescentada; "tenso" na instrução muda o tom |
 | Chat | `request_ai` → worker → `chat_chunk` (streaming) → `chat_message` | resposta palavra a palavra + proposta aplicável |
 | Gerar personagem / background | `request_ai` → worker → `ai_job.result` | placeholders estáticos em `client/public/placeholders/` |
 
@@ -79,8 +80,8 @@ O banco `roteiro-spike` local pertence a outra identidade; o spike de IA usa `ro
 publicação não a exporte. Apenas os scripts do worker o carregam (não versionar).
 
 Para usar a OpenAI, troque para `AI_PROVIDER=openai` em `worker/.env`, publique de novo e reinicie o worker.
-Chat, personagem e background passam a usar a OpenAI; cena sugerida e completar texto (procedures)
-respondem `AI_DISABLED` até ganharem um caminho pelo worker. Opcionais em `worker/.env.openai`:
+Chat, cena sugerida, ação sugerida, completar texto, personagem e background passam a usar a OpenAI.
+O editor pede tudo ao worker; as procedures `suggest_scene` e `complete_text` continuam só com o mock. Opcionais em `worker/.env.openai`:
 `OPENAI_CHAT_MODEL` (padrão `gpt-5-mini`), `OPENAI_REASONING_EFFORT` (padrão `minimal` nos gpt-5),
 `OPENAI_IMAGE_MODEL` (padrão `gpt-image-1`) e `OPENAI_IMAGE_QUALITY` (padrão `low`). As imagens geradas
 vão para `client/public/generated/` (ou `IMAGE_DIR`); o upload ao R2 fica para o deploy. O `gpt-image-1`

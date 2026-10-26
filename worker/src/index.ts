@@ -10,7 +10,8 @@ const SECRET = process.env.WORKER_SECRET ?? '';
 const FLUSH_MS = Number(process.env.CHUNK_FLUSH_MS ?? '80'); // especificação: 50–100 ms
 // Filas separadas: um personagem com vários sprites não pode atrasar o primeiro pedaço do chat.
 const LANES = { chat: Number(process.env.WORKER_CHAT_PARALLEL ?? '8'), image: Number(process.env.WORKER_IMAGE_PARALLEL ?? '4') };
-const TIMEOUT = { chat: 60_000, background: 90_000, image: 90_000, character: 180_000 } as const;
+const TIMEOUT = { chat: 60_000, text: 30_000, background: 90_000, image: 90_000, character: 180_000 } as const;
+const TEXT_KINDS = new Set(['chat', 'scene', 'complete', 'option']); // fila de texto; o resto é imagem
 
 const provider = createProvider(process.env.AI_PROVIDER);
 const store = createStore();
@@ -111,6 +112,9 @@ async function handle(id: string) {
       extra = `${r.chunks} pedaços`;
     } else if (job.kind === 'character') result = await runCharacter(input);
     else if (job.kind === 'background') result = await runBackground(input);
+    else if (job.kind === 'scene') result = await withTimeout(TIMEOUT.text, sig => provider!.scene(input, snapshot(), sig));
+    else if (job.kind === 'complete') result = await withTimeout(TIMEOUT.text, sig => provider!.complete(input, snapshot(), sig));
+    else if (job.kind === 'option') result = await withTimeout(TIMEOUT.text, sig => provider!.option(input, snapshot(), sig));
     else throw new Error('INVALID_KIND');
     await conn.reducers.completeJob({ id, result: JSON.stringify(result) });
     log(`ok   ${job.kind.padEnd(10)} ${id} fila ${waited} ms · execução ${Math.round(performance.now() - t0)} ms ${extra}`);
@@ -134,7 +138,7 @@ function pump() {
 function enqueue(id: string, status: string, kind: string) {
   if (status !== 'pending' || seen.has(id)) return;
   seen.add(id);
-  queues[kind === 'chat' ? 'chat' : 'image'].push(id);
+  queues[TEXT_KINDS.has(kind) ? 'chat' : 'image'].push(id);
   pump();
 }
 
