@@ -1,0 +1,124 @@
+# Deploy contínuo: push na main publica o módulo no Maincloud e depois o cliente no
+# Cloudflare Pages (nessa ordem, para o cliente novo nunca rodar contra o módulo antigo).
+# Pull requests geram só uma prévia do cliente no Pages, sem tocar no módulo.
+#
+# Segredos (Settings → Secrets and variables → Actions → Secrets):
+#   CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, SPACETIMEDB_TOKEN, WORKER_SECRET
+# Variáveis (mesma tela → Variables):
+#   STDB_DB (banco de produção no Maincloud), CF_PAGES_PROJECT,
+#   AI_PROVIDER (opcional: mock | openai), AI_RATE_PER_MIN (opcional),
+#   STDB_DB_PREVIEW (opcional: banco das prévias; sem ele, usam STDB_DB)
+name: deploy
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }} # nunca interrompe um publish da main
+
+env:
+  SPACETIME_VERSION: v2.13.0 # mesma versão do CLI local e do pacote spacetimedb
+  STDB_URI: wss://maincloud.spacetimedb.com
+
+jobs:
+  module:
+    # Só a main publica o módulo (um workflow_dispatch em outra branch gera só a prévia do cliente).
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: server/package-lock.json
+
+      - run: npm ci
+        working-directory: server
+
+      - name: Instalar o CLI do SpacetimeDB
+        env:
+          SPACETIME_DOWNLOAD_ROOT: https://github.com/clockworklabs/SpacetimeDB/releases/download/${{ env.SPACETIME_VERSION }}
+        run: |
+          curl -sSfL https://install.spacetimedb.com | sh -s -- --yes
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Login no Maincloud
+        env:
+          SPACETIMEDB_TOKEN: ${{ secrets.SPACETIMEDB_TOKEN }}
+        run: |
+          spacetime --version
+          spacetime login --token "$SPACETIMEDB_TOKEN"
+
+      # Sem break-clients nem delete-data: uma mudança de esquema que quebre clientes
+      # ou apague dados falha aqui, em vez de ser forçada.
+      - name: Publicar o módulo
+        env:
+          STDB_DB: ${{ vars.STDB_DB }}
+          WORKER_SECRET: ${{ secrets.WORKER_SECRET }}
+          AI_PROVIDER: ${{ vars.AI_PROVIDER }}
+          AI_RATE_PER_MIN: ${{ vars.AI_RATE_PER_MIN }}
+        run: |
+          test -n "$STDB_DB" || { echo "::error::Defina a variável STDB_DB"; exit 1; }
+          # Variáveis vazias viram "não definidas" para o módulo (AI_PROVIDER ausente = IA desligada).
+          [ -n "$AI_PROVIDER" ] || unset AI_PROVIDER
+          [ -n "$AI_RATE_PER_MIN" ] || unset AI_RATE_PER_MIN
+          [ -n "$WORKER_SECRET" ] || unset WORKER_SECRET
+          spacetime publish -s maincloud -p server --yes=remote,migrate,skip-login --delete-data=never "$STDB_DB"
+
+  client:
+    needs: module
+    # Roda depois do módulo na main, e sozinho nas PRs. PRs de forks não recebem segredos.
+    if: >-
+      always() &&
+      (needs.module.result == 'success' || needs.module.result == 'skipped') &&
+      (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: ubuntu-latest
+    environment: ${{ github.event_name == 'pull_request' && 'preview' || 'production' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: client/package-lock.json
+
+      - run: npm ci
+        working-directory: client
+
+      - name: Build
+        working-directory: client
+        env:
+          VITE_STDB_URI: ${{ env.STDB_URI }}
+          VITE_STDB_DB: ${{ github.event_name == 'pull_request' && vars.STDB_DB_PREVIEW || vars.STDB_DB }}
+          VITE_IMAGE_BASE: ${{ vars.VITE_IMAGE_BASE }}
+        run: |
+          test -n "$VITE_STDB_DB" || { echo "::error::Defina a variável STDB_DB"; exit 1; }
+          [ -n "$VITE_IMAGE_BASE" ] || unset VITE_IMAGE_BASE
+          npm run build
+          # Imagens geradas localmente nunca vão para o site (a pasta é ignorada pelo git).
+          rm -rf dist/generated
+
+      - name: Deploy no Cloudflare Pages
+        id: pages
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          # A branch de produção do projeto no Pages deve ser "main"; as outras viram prévias.
+          command: pages deploy client/dist --project-name=${{ vars.CF_PAGES_PROJECT }} --branch=${{ github.head_ref || github.ref_name }} --commit-dirty=true
+
+      - name: Link do deploy
+        run: |
+          echo "### Cloudflare Pages" >> "$GITHUB_STEP_SUMMARY"
+          echo "${{ steps.pages.outputs.deployment-url }}" >> "$GITHUB_STEP_SUMMARY"
