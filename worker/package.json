@@ -3,9 +3,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "start": "tsx --env-file=.env src/index.ts",
-    "test": "tsx --env-file=.env test/correctness.ts",
-    "load": "tsx --env-file=.env test/load.ts"
+    "start": "tsx --env-file=.env --env-file-if-exists=.env.openai src/index.ts",
+    "test": "tsx --env-file=.env --env-file-if-exists=.env.openai test/correctness.ts",
+    "load": "tsx --env-file=.env --env-file-if-exists=.env.openai test/load.ts"
   },
   "dependencies": {
     "spacetimedb": "^2.13.0"
