@@ -103,6 +103,25 @@ Testes (com o worker rodando): `npm --prefix worker test` (correção, 19 casos)
 `npm --prefix worker run load` (5 pessoas editando, sem e com IA ao mesmo tempo). Os dois
 recriam a história de teste; "↺ demo" no editor volta ao exemplo.
 
+## Worker em produção (VM)
+
+O worker de `vn-generation` (Maincloud) roda numa VM e2-micro do Google Cloud (projeto
+`regal-oasis-512900-b3`, zona `us-east1-b`, `roteiro-worker`). Os arquivos ficam em `worker/deploy/`:
+
+- `setup.sh` prepara uma VM Debian 12 nova (Node 22, usuário `roteiro`, código em `/opt/roteiro/app`).
+- `roteiro-worker.service` roda o worker; os segredos ficam em `/etc/roteiro/worker.env`
+  (`STDB_URI`, `STDB_DB`, `WORKER_SECRET`, `AI_PROVIDER`) e `/etc/roteiro/openai.env`, só root lê.
+- `roteiro-update.timer` roda `update.sh` a cada 5 min: implanta o último commit da main cujo
+  workflow `deploy` passou (módulo já publicado). Nenhuma credencial do Google fica no GitHub.
+
+O `WORKER_SECRET` do GitHub (usado ao publicar o módulo) tem que ser o mesmo da VM:
+
+```bash
+gcloud compute ssh roteiro-worker --project=regal-oasis-512900-b3 --zone=us-east1-b --command "sudo sed -n 's/^WORKER_SECRET=//p' /etc/roteiro/worker.env" | gh secret set WORKER_SECRET --repo Gust4voSSM/spacetime-spike
+```
+
+Logs: `gcloud compute ssh roteiro-worker --project=regal-oasis-512900-b3 --zone=us-east1-b --command "sudo journalctl -u roteiro-worker -f"`.
+
 ## Fora deste spike
 
 - Login com Google (precisa de um OAuth client ID) — conexões são anônimas, uma identidade por aba.

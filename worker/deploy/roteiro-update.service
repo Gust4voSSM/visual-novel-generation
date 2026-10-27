@@ -1,0 +1,8 @@
+[Unit]
+Description=Roteiro VN - atualiza o worker a partir da main
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/roteiro/update.sh
