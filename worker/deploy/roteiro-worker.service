@@ -1,0 +1,25 @@
+# Worker de IA (seção 2.6) como serviço. Os segredos ficam em /etc/roteiro (só root lê);
+# o systemd os entrega como variáveis de ambiente antes de trocar para o usuário roteiro.
+[Unit]
+Description=Roteiro VN - worker de IA
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=roteiro
+Group=roteiro
+WorkingDirectory=/opt/roteiro/app/worker
+EnvironmentFile=/etc/roteiro/worker.env
+EnvironmentFile=-/etc/roteiro/openai.env
+ExecStart=/opt/roteiro/app/worker/node_modules/.bin/tsx src/index.ts
+Restart=always
+RestartSec=5
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/roteiro/app/client/public/generated
+
+[Install]
+WantedBy=multi-user.target
