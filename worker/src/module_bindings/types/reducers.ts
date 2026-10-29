@@ -8,6 +8,7 @@ import { type Infer as __Infer } from "spacetimedb";
 // Import all reducer arg schemas
 import ApplyOperationsReducer from "../apply_operations_reducer";
 import ClaimJobReducer from "../claim_job_reducer";
+import ClearChatReducer from "../clear_chat_reducer";
 import CompleteJobReducer from "../complete_job_reducer";
 import FailJobReducer from "../fail_job_reducer";
 import LockFieldReducer from "../lock_field_reducer";
@@ -24,6 +25,7 @@ import UpdateCursorReducer from "../update_cursor_reducer";
 
 export type ApplyOperationsParams = __Infer<typeof ApplyOperationsReducer>;
 export type ClaimJobParams = __Infer<typeof ClaimJobReducer>;
+export type ClearChatParams = __Infer<typeof ClearChatReducer>;
 export type CompleteJobParams = __Infer<typeof CompleteJobReducer>;
 export type FailJobParams = __Infer<typeof FailJobReducer>;
 export type LockFieldParams = __Infer<typeof LockFieldReducer>;

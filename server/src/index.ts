@@ -434,6 +434,11 @@ export const request_ai = spacetimedb.reducer(
   }
 );
 
+// Apaga a conversa de quem chama; os pedidos em ai_job ficam (o worker pode estar usando).
+export const clear_chat = spacetimedb.reducer(ctx => {
+  for (const m of [...ctx.db.chatMessage.user.filter(ctx.sender)]) ctx.db.chatMessage.id.delete(m.id);
+});
+
 // O worker prova quem é com WORKER_SECRET; a identidade dele fica em config.
 export const register_worker = spacetimedb.reducer({ secret: t.string() }, (ctx, { secret }) => {
   const expected = ctx.env.WORKER_SECRET;
@@ -465,7 +470,8 @@ export const complete_job = spacetimedb.reducer({ id: t.string(), result: t.stri
   const j = jobFor(ctx, id);
   if (j.status !== 'running') throw new SenderError('INVALID');
   ctx.db.aiJob.id.update({ ...j, status: 'done', result, updatedAt: ctx.timestamp });
-  if (j.kind === 'chat') {
+  // Conversa limpa enquanto a IA respondia: a resposta não volta para o chat.
+  if (j.kind === 'chat' && ctx.db.chatMessage.id.find(id + ':u')) {
     let r: { content?: string; proposals?: unknown[] };
     try { r = JSON.parse(result); } catch { throw new SenderError('INVALID'); }
     ctx.db.chatMessage.insert({
