@@ -5,6 +5,7 @@
   "scripts": {
     "start": "tsx --env-file=.env --env-file-if-exists=.env.openai src/index.ts",
     "test": "tsx --env-file=.env --env-file-if-exists=.env.openai test/correctness.ts",
+    "test:stories": "tsx --env-file=.env test/stories.ts",
     "load": "tsx --env-file=.env --env-file-if-exists=.env.openai test/load.ts"
   },
   "dependencies": {

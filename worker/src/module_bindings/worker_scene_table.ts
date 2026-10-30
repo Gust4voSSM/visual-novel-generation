@@ -12,8 +12,16 @@ import {
 
 export default __t.row({
   id: __t.string().primaryKey(),
-  sceneId: __t.string().name("scene_id"),
-  label: __t.string(),
-  target: __t.string(),
-  position: __t.u32(),
+  storyId: __t.string().name("story_id"),
+  title: __t.string(),
+  x: __t.f64(),
+  y: __t.f64(),
+  bg: __t.string(),
+  chars: __t.string(),
+  kind: __t.string(),
+  speaker: __t.string(),
+  text: __t.string(),
+  next: __t.string(),
+  ai: __t.string(),
+  updatedBy: __t.identity().name("updated_by"),
 });

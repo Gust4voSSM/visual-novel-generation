@@ -11,5 +11,6 @@ import {
 } from "spacetimedb";
 
 export default {
+  storyId: __t.string(),
   ops: __t.string(),
 };

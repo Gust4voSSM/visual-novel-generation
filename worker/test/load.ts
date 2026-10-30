@@ -2,7 +2,7 @@
 // com IA em paralelo (procedures com espera de rede, chat em streaming, personagens).
 // Pergunta principal: a IA atrasa as ações discretas além da meta (p95 ≤ 300 ms)?
 // Precisa do worker rodando. Variáveis: USERS (5), PHASE_S (20).
-import { CONTEXT, EDITOR_QUERIES, connect, pct, proc, seedStory, sleep, uid, waitFor, type Client } from './harness';
+import { CONTEXT, EDITOR_QUERIES, connect, pct, proc, seedStory, sleep, uid, waitFor, type Client, T } from './harness';
 
 const USERS = Number(process.env.USERS ?? '5');
 const PHASE_MS = Number(process.env.PHASE_S ?? '20') * 1000;
@@ -12,20 +12,20 @@ type Stats = { op: number[]; remote: number[]; cursor: number[]; errors: string[
 const fresh = (): Stats => ({ op: [], remote: [], cursor: [], errors: [] });
 
 const users: Client[] = [];
-for (let i = 0; i < USERS; i++) users.push(await connect('u' + i, [...EDITOR_QUERIES, 'SELECT * FROM presence']));
-await seedStory(users[0]);
+for (let i = 0; i < USERS; i++) users.push(await connect('u' + i, [...EDITOR_QUERIES, 'SELECT * FROM cur_presence']));
+await seedStory(users[0], users.slice(1));
 // Cada pessoa edita a própria cena, ligada ao grafo: o reducer valida o grafo inteiro a cada lote.
-await users[0].conn.reducers.applyOperations({ ops: JSON.stringify(users.flatMap((_, i) => [
-  { op: 'upsert_scene', scene: { id: 'load' + i, title: 'Carga ' + i, x: 800, y: i * 300, bg: '', chars: '[]', kind: 'narration', speaker: '', text: '', next: '', ai: '' } },
-  { op: 'upsert_choice', choice: { id: 'lc' + i, sceneId: 't2', label: 'Ir ' + i, target: 'load' + i, position: i } },
+await users[0].conn.reducers.applyOperations({ storyId: T.story, ops: JSON.stringify(users.flatMap((_, i) => [
+  { op: 'upsert_scene', scene: { id: T.story + 'L' + i, title: 'Carga ' + i, x: 800, y: i * 300, bg: '', chars: '[]', kind: 'narration', speaker: '', text: '', next: '', ai: '' } },
+  { op: 'upsert_choice', choice: { id: T.story + 'C' + i, sceneId: T.s2, label: 'Ir ' + i, target: T.story + 'L' + i, position: i } },
 ])) });
-await Promise.all(users.map(u => waitFor('cenas de carga', () => u.conn.db.scene.id.find('load' + (USERS - 1)))));
+await Promise.all(users.map(u => waitFor('cenas de carga', () => u.conn.db.curScene.id.find(T.story + 'L' + (USERS - 1)))));
 
 // Propagação: quando u0 grava um texto marcado, quanto tempo até os outros verem.
 const sentAt = new Map<string, number>();
 let stats = fresh();
 for (const u of users.slice(1)) {
-  u.conn.db.scene.onUpdate((_c, _old, row) => {
+  u.conn.db.curScene.onUpdate((_c, _old, row) => {
     const t = sentAt.get(row.text);
     if (t !== undefined) stats.remote.push(performance.now() - t);
   });
@@ -38,7 +38,7 @@ async function editor(u: Client, i: number, until: number) {
     const t0 = performance.now();
     if (i === 0) sentAt.set(text, t0);
     try {
-      await u.conn.reducers.applyOperations({ ops: JSON.stringify([{ op: 'upsert_scene', scene: { id: 'load' + i, text, x: 800 + (n % 40), y: i * 300 } }]) });
+      await u.conn.reducers.applyOperations({ storyId: T.story, ops: JSON.stringify([{ op: 'upsert_scene', scene: { id: T.story + 'L' + i, text, x: 800 + (n % 40), y: i * 300 } }]) });
       stats.op.push(performance.now() - t0);
     } catch (e) { stats.errors.push('op: ' + String((e as Error)?.message ?? e).slice(0, 80)); }
     await sleep(300 + Math.random() * 200);
@@ -65,8 +65,8 @@ async function aiUser(u: Client, i: number, until: number) {
     while (performance.now() < until) {
       const t0 = performance.now();
       try {
-        if (i % 2) await proc(u.conn.procedures.suggestScene({ sourceSceneId: 't1', choiceId: 'tc2', instruction: '', newSceneId: uid('s'), context: ctxJson }));
-        else await proc(u.conn.procedures.completeText({ sceneId: 't1', text: 'Era uma vez.', textKind: 'narration', speakerName: '', instruction: '' }));
+        if (i % 2) await proc(u.conn.procedures.suggestScene({ sourceSceneId: T.s1, choiceId: T.c2, instruction: '', newSceneId: uid('s'), context: ctxJson }));
+        else await proc(u.conn.procedures.completeText({ sceneId: T.s1, text: 'Era uma vez.', textKind: 'narration', speakerName: '', instruction: '' }));
         (i % 2 ? ai.suggest : ai.complete).push(performance.now() - t0);
       } catch (e) { ai.errors.push('proc: ' + String((e as Error)?.message ?? e).slice(0, 80)); }
       await sleep(1000);
@@ -82,7 +82,7 @@ async function aiUser(u: Client, i: number, until: number) {
       u.conn.db.chatChunk.onInsert(on);
       const t0 = performance.now();
       try {
-        await u.conn.reducers.requestAi({ id, kind: 'chat', input: JSON.stringify({ message: 'continue a história a partir do final', context: CONTEXT }) });
+        await u.conn.reducers.requestAi({ storyId: T.story, id, kind: 'chat', input: JSON.stringify({ message: 'continue a história a partir do final', context: CONTEXT }) });
         const j = await waitFor('chat', () => { const r = u.conn.db.myAiJob.id.find(id); return r && (r.status === 'done' || r.status === 'failed') ? r : null; }, 30_000);
         if (j.status !== 'done') ai.errors.push('chat: ' + j.error);
         else {
@@ -98,7 +98,7 @@ async function aiUser(u: Client, i: number, until: number) {
   // Um personagem com 4 sprites por pessoa.
   tasks.push((async () => {
     const id = uid('j'), t0 = performance.now();
-    await u.conn.reducers.requestAi({ id, kind: 'character', input: JSON.stringify({ name: 'C' + i, desc: '', emotions: ['Neutro', 'Feliz', 'Triste', 'Bravo'].map(n => ({ name: n, desc: '' })) }) });
+    await u.conn.reducers.requestAi({ storyId: T.story, id, kind: 'character', input: JSON.stringify({ name: 'C' + i, desc: '', emotions: ['Neutro', 'Feliz', 'Triste', 'Bravo'].map(n => ({ name: n, desc: '' })) }) });
     const j = await waitFor('personagem', () => { const r = u.conn.db.myAiJob.id.find(id); return r && (r.status === 'done' || r.status === 'failed') ? r : null; }, 60_000);
     if (j.status === 'done') ai.character.push(performance.now() - t0); else ai.errors.push('personagem: ' + j.error);
   })());
