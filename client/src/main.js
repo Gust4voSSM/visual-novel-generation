@@ -159,9 +159,11 @@ function toWorld(cx,cy){const r=canvas.getBoundingClientRect();return{x:(cx-r.le
 function zoomAt(z2,cx,cy){const r=canvas.getBoundingClientRect();const px=cx-r.left,py=cy-r.top;const z=Math.max(.3,Math.min(2,z2));const wx=(px-view.x)/view.z,wy=(py-view.y)/view.z;view.z=z;view.x=px-wx*z;view.y=py-wy*z;applyView();}
 function nodeH(id){const el=nodeEl(id);return el?el.offsetHeight:460;}
 const nodeEl=id=>nodesEl.querySelector(`.node[data-id="${id}"]`);
-function fitView(){if(!state.scenes.length)return;const r=canvas.getBoundingClientRect();let x0=1e9,y0=1e9,x1=-1e9,y1=-1e9;state.scenes.forEach(s=>{x0=Math.min(x0,s.x);y0=Math.min(y0,s.y);x1=Math.max(x1,s.x+300);y1=Math.max(y1,s.y+nodeH(s.id));});
-  const top=70,pad=40;const z=Math.min(1,Math.max(.5,Math.min((r.width-pad*2)/(x1-x0),(r.height-top-pad-60)/(y1-y0))));view.z=z;
-  view.x=(x1-x0)*z<=r.width-pad*2?(r.width-(x1-x0)*z)/2-x0*z:pad-x0*z;view.y=(y1-y0)*z<=r.height-top-pad-60?top+(r.height-top-60-(y1-y0)*z)/2-y0*z:top-y0*z;applyView();}
+// Enquadra a história inteira; animate desliza até lá (botão Centralizar) em vez de pular.
+function fitView(animate){if(!state.scenes.length)return;const r=canvas.getBoundingClientRect();let x0=1e9,y0=1e9,x1=-1e9,y1=-1e9;state.scenes.forEach(s=>{x0=Math.min(x0,s.x);y0=Math.min(y0,s.y);x1=Math.max(x1,s.x+300);y1=Math.max(y1,s.y+nodeH(s.id));});
+  const top=70,pad=40;const z=Math.min(1,Math.max(.5,Math.min((r.width-pad*2)/(x1-x0),(r.height-top-pad-60)/(y1-y0))));
+  const x=(x1-x0)*z<=r.width-pad*2?(r.width-(x1-x0)*z)/2-x0*z:pad-x0*z,y=(y1-y0)*z<=r.height-top-pad-60?top+(r.height-top-60-(y1-y0)*z)/2-y0*z:top-y0*z;
+  if(animate===true&&!reduced){flyTo(x,y,z);return;}view.x=x;view.y=y;view.z=z;applyView();}
 
 /* ---------- live fx state ---------- */
 let dirty=true;
@@ -246,7 +248,7 @@ function renderNodes(){const{list,reach}=warnings();const ws=new Set(list.map(w=
   if(keep&&keep.id){const n=nodeEl(keep.id);const el=n&&n.querySelector(`[data-act="${keep.act}"]${keep.i!=null?`[data-i="${keep.i}"]`:''}`);if(el){el.focus({preventScroll:true});try{if(keep.s!=null)el.setSelectionRange(keep.s,keep.e);}catch(_){}}}
   renderStats(list);renderSelbar();dirty=true;}
 function refresh(){renderNodes();scheduleSync();}
-function renderStats(list){const nA=state.scenes.reduce((a,s)=>a+s.choices.length,0);$('#stats').innerHTML=`${state.scenes.length} cenas · ${nA} ações · ${list.length?`<button class="warnlink" id="warnBtn">${list.length} aviso${list.length>1?'s':''}</button>`:'sem avisos'}`;
+function renderStats(list){const nA=state.scenes.reduce((a,s)=>a+s.choices.length,0);$('#stats').innerHTML=`${state.scenes.length} cena${state.scenes.length===1?'':'s'} · ${nA} aç${nA===1?'ão':'ões'}${list.length?` · <button class="warnlink" id="warnBtn">⚠ ${list.length} aviso${list.length>1?'s':''}</button>`:''}`;
   const b=$('#warnBtn');if(b)b.onclick=e=>{e.stopPropagation();const h=$('#warnHost');if(h.innerHTML){h.innerHTML='';return;}h.innerHTML=`<div class="warnpop"><h3>Avisos de qualidade</h3><div class="hint">Não bloqueiam o salvamento; a publicação pede confirmação.</div><ul>${list.map(w=>`<li>${esc(w.t)}</li>`).join('')}</ul></div>`;};}
 function renderSelbar(){const h=$('#selbarHost');const n=[...selected].filter(id=>scene(id)).length;if(!n||(touchUI&&!selectMode&&n<2)){h.innerHTML='';delete h.dataset.n;return;}if(h.dataset.n==String(n)&&h.innerHTML)return;h.dataset.n=n;h.innerHTML=`<div class="selbar"><span>${n} ${n===1?'selecionada':'selecionadas'}</span><button class="btn sm" id="selDel">Excluir</button><button class="btn sm" id="selClear">Limpar</button></div>`;$('#selDel').onclick=()=>deleteScenes([...selected]);$('#selClear').onclick=()=>{selected.clear();syncSel();};}
 function syncSel(){if(!selected.size)selectMode=false;nodesEl.querySelectorAll('.node').forEach(n=>n.classList.toggle('sel',selected.has(n.dataset.id)));renderSelbar();}
@@ -428,7 +430,7 @@ function closeMenu(){if(openMenu){openMenu.remove();openMenu=null;}}
 
 /* ---------- canvas pointer ---------- */
 canvas.addEventListener('contextmenu',e=>{if(!e.target.closest('input,textarea'))e.preventDefault();});
-canvas.addEventListener('pointerdown',e=>{if(e.target.closest('.hud,.zoombar,.selbar,.warnpop,.menu,.cutbtn'))return;closeMenu();$('#warnHost').innerHTML='';
+canvas.addEventListener('pointerdown',e=>{if(e.target.closest('.hud,.hudpop,.zoombar,.selbar,.warnpop,.menu,.cutbtn'))return;closeMenu();$('#warnHost').innerHTML='';
   const touch=e.pointerType==='touch';
   if(touch){touches.set(e.pointerId,{x:e.clientX,y:e.clientY});
     if(touches.size===2&&(!drag||drag.type==='pan'||(drag.type==='wire'&&!drag.moved))){e.preventDefault();clearTimeout(holdTimer);if(drag&&drag.type==='wire'){drag=null;refreshPorts();}startPinch();canvas.setPointerCapture(e.pointerId);return;}
@@ -515,7 +517,7 @@ $('#storyTitle').addEventListener('change',endTyping);
 function endTyping(){clearTimeout(syncTimer);syncNow();if(pendingSnap&&typingTouched&&typingTouched.size)pushUndo(pendingSnap,typingTouched);pendingSnap=null;typingTouched=null;}
 $('#btnUndo').onclick=undo;$('#btnRedo').onclick=redo;
 const ctr=()=>{const r=canvas.getBoundingClientRect();return[r.left+r.width/2,r.top+r.height/2];};
-$('#btnZoomIn').onclick=()=>zoomAt(view.z*1.25,...ctr());$('#btnZoomOut').onclick=()=>zoomAt(view.z*.8,...ctr());$('#btnZoomReset').onclick=fitView;
+$('#btnZoomIn').onclick=()=>zoomAt(view.z*1.25,...ctr());$('#btnZoomOut').onclick=()=>zoomAt(view.z*.8,...ctr());$('#btnZoomReset').onclick=()=>fitView(true);$('#btnCenter').onclick=()=>fitView(true);
 $('#btnAddScene').onclick=()=>{const[cx,cy]=ctr();const p=toWorld(cx-150,cy-200);pushUndo();const s=blankScene(p.x,p.y);state.scenes.push(s);expanded=s.id;if(!scene(state.start))state.start=s.id;fresh.set(s.id,{t0:performance.now(),cls:'pop'});refresh();burst(s.x,s.y+20,'plain');};
 $('#btnPlay').onclick=()=>openPlay();
 const appEl=$('.app');const mqNarrow=matchMedia('(max-width:900px)');
@@ -788,9 +790,9 @@ function syncNow(){if(!base||!connected||resetting||!viewsMine())return;const sk
   // Leitor: a edição local volta ao estado do servidor.
   if(myRole==='viewer'){writeFlat(cloneFlat(base));renderNodes();const n=Date.now();if(n-roAt>4000){roAt=n;toast('Você tem acesso só de leitura a esta história.','err');}return;}
   const touched=typingTouched||collector;for(const o of ops)touchKeys(o,base).forEach(k=>touched.add(k));
-  applyOps(base,ops);const b={ops,t0:performance.now()};inflight.push(b);
+  applyOps(base,ops);const b={ops,t0:performance.now()};inflight.push(b);renderNet();
   conn.reducers.applyOperations({storyId,ops:JSON.stringify(ops)}).then(()=>{rtt.add('op',performance.now()-b.t0);settle(b);},err=>{settle(b);rejected(err,ops);});}
-function settle(b){const i=inflight.indexOf(b);if(i>=0)inflight.splice(i,1);scheduleRebuild();}
+function settle(b){const i=inflight.indexOf(b);if(i>=0)inflight.splice(i,1);renderNet();scheduleRebuild();}
 const ERRS={CYCLE:'Essa ligação fecharia um ciclo. Alguém pode ter criado o outro fio agora há pouco.',LOCKED:'Outra pessoa está escrevendo nesse campo.',START:'A cena inicial não pode ser excluída.',NO_START:'A história ficaria sem cena inicial.',BOTH:'Uma cena não pode ter ações e saída única ao mesmo tempo.',NOT_FOUND:'Essa cena foi apagada por outra pessoa.',TOO_MANY:'Uma cena tem no máximo 6 personagens.',DUP_CHAR:'Esse personagem já está na cena.',SPEAKER:'Quem fala precisa estar na cena.',INVALID:'Alteração inválida.',FORBIDDEN:'Você não tem permissão para essa alteração.'};
 function rejected(err,ops){const m=errMsg(err);const code=(m.match(/\b(CYCLE|LOCKED|START|NO_START|BOTH|NOT_FOUND|TOO_MANY|DUP_CHAR|SPEAKER|INVALID|FORBIDDEN)\b(?::\d+(?::([\w-]+))?)?/)||[]);
   if(code[1]){toast('Recusado pelo servidor: '+ERRS[code[1]],'err');if(code[2]&&scene(code[2]))nodeShake(code[2]);else shake();return;}
@@ -859,8 +861,9 @@ function syncCursors(){if(!conn)return;if(!cursorLayer){cursorLayer=document.cre
   for(const[k,c]of cursors)if(!live.has(k)){c.el.remove();cursors.delete(k);}}
 function renderPeople(){const host=$('#people');if(!host||!conn)return;const seen=new Map;
   for(const p of conn.db.curPresence.iter()){const h=hex(p.identity);if(!seen.has(h))seen.set(h,{p,mine:myId&&p.identity.isEqual(myId)});}
-  const list=[...seen.values()].sort((a,b)=>b.mine-a.mine);
-  host.innerHTML=list.map(({p,mine})=>{const pr=profOf(p.identity);return`<button class="pav${mine?' me':''}" data-conn="${p.connectionId.toHexString()}" style="--pc:${pr.color}" title="${esc(pr.name)}${mine?' (você) — clique para trocar o nome':' — clique para ir até o cursor'}">${esc(pr.name.slice(0,1).toUpperCase())}</button>`;}).join('')+`<span class="pcount">${list.length} na história</span>`;}
+  const all=[...seen.values()].sort((a,b)=>b.mine-a.mine),list=all.slice(0,3),more=all.slice(3);
+  host.innerHTML=list.map(({p,mine})=>{const pr=profOf(p.identity);return`<button class="pav${mine?' me':''}" data-conn="${p.connectionId.toHexString()}" style="--pc:${pr.color}" title="${esc(pr.name)}${mine?' (você) — clique para trocar o nome':' — clique para ir até o cursor'}">${esc(pr.name.slice(0,1).toUpperCase())}</button>`;}).join('')+`${more.length?`<span class="pmore" title="${esc(more.map(({p})=>profOf(p.identity).name).join(', '))}">+${more.length}</span>`:''}`;
+  host.title=all.length===1?'Só você nesta história':`${all.length} pessoas nesta história`;}
 document.addEventListener('click',e=>{const b=e.target.closest('.pav');if(!b)return;
   if(b.classList.contains('me')){const me=profOf(myId);askText({title:'Seu nome',label:'como as outras pessoas veem você',value:me.name,max:40,ok:'Salvar'}).then(n=>{if(n&&n!==me.name)conn.reducers.setProfile({name:n,color:me.color}).catch(err=>toast('Não foi possível trocar o nome: '+errMsg(err),'err'));});return;}
   const c=cursors.get(b.dataset.conn);if(!c)return;const r=canvas.getBoundingClientRect();view.x=r.width/2-c.tx*view.z;view.y=r.height/2-c.ty*view.z;applyView();});
@@ -879,25 +882,41 @@ function releaseLock(){if(!curLock)return;const t=curLock.target;curLock=null;if
 function dropFieldLock(el){const t=curLock&&curLock.target;setTimeout(()=>{if(t&&fieldTarget(document.activeElement)!==t){if(pendingSnap)endTyping();if(curLock&&curLock.target===t)releaseLock();}},0);}
 setInterval(()=>{if(!curLock||!connected)return;if(fieldTarget(document.activeElement)===curLock.target)conn.reducers.renewFieldLock({target:curLock.target}).catch(()=>{});else releaseLock();},5000);
 
-/* HUD: histórias, presença, compartilhar, rede e reinício */
-const hud=$('.hud');hud.insertAdjacentHTML('afterbegin','<button class="chip" id="btnHome" title="Voltar para suas histórias">← Histórias</button><div class="people" id="people"></div><button class="chip" id="btnShare" title="Pessoas com acesso a esta história">Compartilhar</button>');
-$('#stats').insertAdjacentHTML('beforebegin','<button class="chip net" id="net" title="Ida e volta até o SpacetimeDB">conectando…</button>');
-$('#btnAddScene').insertAdjacentHTML('beforebegin','<button class="zbtn" id="btnReset" title="Apaga as cenas desta história e recria o exemplo">↺ exemplo</button><span class="zsep"></span>');
-$('#btnReset').onclick=()=>askConfirm({title:'Recriar o exemplo',ok:'Apagar e recriar',danger:true,text:'Todas as cenas desta história são apagadas e trocadas pelo exemplo, para todas as pessoas que estão nela.'}).then(yes=>{if(yes)resetExample();});
+/* HUD: voltar, título, ⋯, salvamento, pessoas, compartilhar e atalhos */
 $('#btnHome').onclick=()=>navigate('/home');
 $('#btnShare').onclick=()=>shareModal();
+// Popovers do topo: um por vez, logo abaixo do botão; fecham ao clicar fora, com Esc ou no mesmo botão.
+function toggleHudPop(btn,html){const h=$('#hudPop');if(h.dataset.for===btn.id){closeHudPop();return;}
+  h.innerHTML=html;h.dataset.for=btn.id;h.hidden=false;btn.setAttribute('aria-expanded','true');
+  const c=canvas.getBoundingClientRect(),r=btn.getBoundingClientRect(),w=h.offsetWidth;
+  h.style.top=(r.bottom-c.top+8)+'px';h.style.left=Math.max(16,Math.min(r.left-c.left,c.width-w-16))+'px';return h;}
+function closeHudPop(){const h=$('#hudPop');if(h.hidden)return;$('#'+h.dataset.for)?.setAttribute('aria-expanded','false');h.hidden=true;h.innerHTML='';delete h.dataset.for;}
+document.addEventListener('pointerdown',e=>{if(!e.target.closest('#hudPop,[data-pop]'))closeHudPop();});
+document.addEventListener('keydown',e=>{if(e.key==='Escape')closeHudPop();});
+// ⋯: ações raras e destrutivas, fora da barra (só o dono vê o botão).
+$('#btnMore').onclick=e=>{const h=toggleHudPop(e.currentTarget,'<div class="menu" role="menu"><button data-m="reset" class="danger" role="menuitem">Recriar o exemplo…</button></div>');if(!h)return;
+  h.querySelector('[data-m="reset"]').onclick=()=>{closeHudPop();askConfirm({title:'Recriar o exemplo',ok:'Apagar e recriar',danger:true,text:'Todas as cenas desta história são apagadas e trocadas pelo exemplo, para todas as pessoas que estão nela.'}).then(yes=>{if(yes)resetExample();});};};
+const SHORTCUTS=[['Clique ou arraste uma saída','cria uma cena ligada a ela'],['<span class="kbd">Shift</span> + clicar ou arrastar','a IA monta a cena'],['<span class="kbd">Shift</span> em “+ ação”','a IA sugere a ação'],
+  ['<span class="kbd">Alt</span> + arrastar','corta fios'],['<span class="kbd">Ctrl</span> <span class="kbd">Z</span>','desfaz'],['<span class="kbd">Ctrl</span> <span class="kbd">Shift</span> <span class="kbd">Z</span>','refaz']];
+$('#btnHelp').onclick=e=>toggleHudPop(e.currentTarget,`<div class="helppop" role="dialog" aria-label="Atalhos"><h3>Atalhos</h3><dl>${SHORTCUTS.map(([k,v])=>`<dt>${k}</dt><dd>${v}</dd>`).join('')}</dl></div>`);
+// Na primeira história aberta neste navegador, os atalhos aparecem uma vez como dica.
+function firstTip(){let seen=true;try{seen=!!localStorage.getItem('roteiro:dica-atalhos');localStorage.setItem('roteiro:dica-atalhos','1');}catch(_){}
+  if(!seen&&!touchUI)setTimeout(()=>toast('Dica: clique ou arraste uma saída para criar uma cena; com Shift, a IA monta. Os atalhos ficam no botão ? do topo.','ai'),900);}
 document.body.insertAdjacentHTML('beforeend','<div class="netbanner" id="netbanner" role="status" hidden></div>');
 let netState='connecting',retryIn=0,netDownAt=0,leaving=false;
 // F5 ou navegação: o navegador fecha o WebSocket antes de trocar de página; não é queda de rede.
 addEventListener('pagehide',()=>{leaving=true;});
+// Status ao lado do título: salvo / salvando… / sem conexão. As medidas do spike ficam na dica e no clique.
 function renderNet(){const el=$('#net');if(!el)return;const p50=pct(rtt.ping,.5),p95=pct(rtt.ping,.95),o50=pct(rtt.op,.5),o95=pct(rtt.op,.95);
-  el.className='chip net '+netState;
-  el.innerHTML=netState==='on'?`<span class="ndot"></span>${WHERE} · ping ${p50??'–'} ms <span class="dim">p95 ${p95??'–'}</span> · ações ${o50??'–'} ms <span class="dim">p95 ${o95??'–'} (n=${rtt.op.length})</span>`:netState==='off'?'<span class="ndot"></span>sem conexão':'<span class="ndot"></span>conectando…';
+  const saving=netState==='on'&&inflight.length>0;
+  el.className='sync '+(saving?'saving':netState);
+  el.querySelector('.slabel').textContent=saving?'salvando…':netState==='on'?'salvo':netState==='connecting'?'conectando…':'sem conexão';
+  el.title=`${WHERE} · ping ${p50??'–'} ms (p95 ${p95??'–'}) · ações ${o50??'–'} ms (p95 ${o95??'–'}, n=${rtt.op.length}). Clique para detalhes.`;
   // O aviso só aparece se a queda passar de 1 s: reconexões rápidas não piscam na tela.
   const down=netState==='off'||netState==='err';if(!down)netDownAt=0;else if(!netDownAt){netDownAt=performance.now();setTimeout(renderNet,1000);}
   const b=$('#netbanner');b.hidden=!down||performance.now()-netDownAt<950;b.textContent=netState==='err'?`Não foi possível conectar a ${STDB_URI} (banco ${STDB_DB}).`:`Sem conexão — reconectando${retryIn?` em ${Math.ceil(retryIn/1000)} s`:''}…`;
   appEl.classList.toggle('offline',netState!=='on');}
-$('#net').onclick=()=>{const all=rtt.op;toast(`Ações confirmadas: ${all.length} · p50 ${pct(all,.5)??'–'} ms · p95 ${pct(all,.95)??'–'} ms · máx ${all.length?Math.round(Math.max(...all)):'–'} ms. Meta da especificação: p95 ≤ 300 ms.`);};
+$('#net').onclick=()=>{const all=rtt.op;toast(`${WHERE} · ações confirmadas: ${all.length} · p50 ${pct(all,.5)??'–'} ms · p95 ${pct(all,.95)??'–'} ms · máx ${all.length?Math.round(Math.max(...all)):'–'} ms. Meta da especificação: p95 ≤ 300 ms.`);};
 
 /* ---------- histórias: lista, abrir e sair ---------- */
 const ROLE_LABEL={owner:'sua',editor:'pode editar',viewer:'só leitura'};
@@ -923,7 +942,7 @@ $('#btnNewExample').onclick=()=>createStory(true);
 $('#btnLogout').onclick=()=>logout();
 
 function updateRole(){myRole=storyId?roleIn(storyId):'';const ro=myRole==='viewer';
-  appEl.classList.toggle('ro',ro);$('#storyTitle').readOnly=ro;$('#btnReset').hidden=myRole!=='owner';}
+  appEl.classList.toggle('ro',ro);$('#storyTitle').readOnly=ro;$('#btnMore').hidden=myRole!=='owner';}
 function resetChat(){log.innerHTML='';chatJobs.clear();chatSeen.clear();addMsg(CHAT_HELLO,'bot');}
 // Esquece o grafo, o desfazer e a conversa da história anterior.
 function leaveStory(close=true){if(!storyId)return;releaseLock();
@@ -931,7 +950,7 @@ function leaveStory(close=true){if(!storyId)return;releaseLock();
   if(dragSub){try{dragSub.unsubscribe();}catch(_){}dragSub=null;}
   storyId='';myRole='';ready=false;base=null;inflight.length=0;retryOps=[];expanded=null;
   undoS.length=0;redoS.length=0;gens.clear();lit.clear();remoteDrag.clear();for(const c of cursors.values())c.el.remove();cursors.clear();
-  state.scenes=[];state.title='';state.start='';closeModal();resetChat();renderAll();}
+  state.scenes=[];state.title='';state.start='';closeModal();closeHudPop();resetChat();renderAll();}
 function showHome(){leaveStory();$('#gate').hidden=true;$('#home').hidden=false;document.title='Roteiro VN';renderHome();}
 async function enterStory(id){$('#gate').hidden=true;$('#home').hidden=true;if(storyId===id)return;leaveStory(false);storyId=id;
   try{await conn.reducers.openStory({storyId:id});await until(()=>storyId!==id||viewsMine());}
@@ -940,7 +959,7 @@ async function enterStory(id){$('#gate').hidden=true;$('#home').hidden=true;if(s
   document.documentElement.classList.remove('boot');
   // Tabela de eventos: views não a cobrem, então o filtro vai na assinatura.
   dragSub=conn.subscriptionBuilder().subscribe([`SELECT * FROM drags WHERE story_id = '${id}'`]);
-  updateRole();document.title=(conn.db.curStory.id.find(id)?.title||'História')+' · Roteiro VN';onReady();}
+  updateRole();document.title=(conn.db.curStory.id.find(id)?.title||'História')+' · Roteiro VN';onReady();firstTip();}
 /* rotas: /login, /home e /s/<id> (o Pages e o Vite devolvem o index.html para qualquer caminho) */
 const NEXT_KEY='roteiro:next';
 function navigate(path,replace){if(location.pathname!==path)history[replace?'replaceState':'pushState'](null,'',path);route();}

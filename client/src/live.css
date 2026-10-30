@@ -1,16 +1,11 @@
 /* Camada de tempo real do spike: presença, cursores, arrasto remoto, travas e rede. */
-.people{display:flex;align-items:center;gap:4px;pointer-events:auto;background:rgba(28,29,33,.92);box-shadow:inset 0 0 0 1px var(--line);border-radius:8px;padding:5px 10px 5px 6px}
+.people{display:flex;align-items:center;pointer-events:auto;padding:0 4px}
 .pav{width:26px;height:26px;border-radius:50%;border:0;background:var(--pc);color:#111214;font-weight:600;font-size:12px;display:grid;place-items:center;box-shadow:0 0 0 2px var(--surface)}
 .pav.me{box-shadow:0 0 0 2px var(--surface),0 0 0 3.5px var(--pc)}
 .pav+.pav{margin-left:-6px}
-.pcount{margin-left:8px;color:var(--text-2);font-size:12.5px;white-space:nowrap}
+.pmore{margin-left:-6px;min-width:26px;height:26px;padding:0 6px;border-radius:13px;background:var(--surface-2);color:var(--text-2);font-size:11.5px;font-weight:600;display:grid;place-items:center;box-shadow:0 0 0 2px var(--surface)}
 
-.chip.net{pointer-events:auto;font-family:var(--mono);font-size:12px}
-.chip.net .dim{color:var(--muted)}
-@media (max-width:600px){.chip.net .dim{display:none}}
 .ndot{width:8px;height:8px;border-radius:50%;background:var(--muted);flex:none}
-.chip.net.on .ndot{background:#4ade80;box-shadow:0 0 0 3px rgba(74,222,128,.18)}
-.chip.net.off .ndot,.chip.net.err .ndot{background:var(--red)}
 
 .netbanner{position:fixed;left:50%;top:12px;transform:translateX(-50%);z-index:80;background:var(--red-bg);color:#ffd9d9;box-shadow:0 0 0 1px #6b2b33,0 10px 24px rgba(0,0,0,.45);padding:8px 14px;border-radius:8px;font-size:13px}
 .app.offline #nodes{pointer-events:none}
