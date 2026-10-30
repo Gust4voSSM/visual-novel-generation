@@ -369,7 +369,7 @@ function aiMessage(err){const m=String(err&&err.message||err);const c=Object.key
 async function callProc(name,args){if(!connected)throw new Error('OFFLINE');const r=JSON.parse(await conn.procedures[name](args));if(r.error)throw new Error(r.error);return r;}
 // Pedidos ao worker: resolve quando o ai_job termina (chega pela view my_ai_job).
 const jobWaiters=new Map;
-function requestAi(kind,input){const id=uid('j');return conn.reducers.requestAi({id,kind,input:JSON.stringify(input)}).then(()=>id);}
+function requestAi(kind,input){const id=uid('j');return conn.reducers.requestAi({id,storyId,kind,input:JSON.stringify(input)}).then(()=>id);}
 function waitJob(id){const j=conn.db.myAiJob.id.find(id);if(j&&(j.status==='done'||j.status==='failed'))return Promise.resolve(j);return new Promise(res=>jobWaiters.set(id,res));}
 // Pedido de texto ao worker (cena, completar, ação): devolve o resultado já lido.
 const aiJob=(kind,input)=>requestAi(kind,input).then(waitJob).then(j=>{if(j.status!=='done')throw new Error(j.error);return JSON.parse(j.result);});
@@ -584,7 +584,20 @@ function publish(kind,item){const copy=JSON.parse(JSON.stringify(item));copy.id=
 
 /* ---------- modals ---------- */
 function modal(html,cls){closeModal();const w=document.createElement('div');w.className='modal-wrap';w.innerHTML=`<div class="modal ${cls||''}" role="dialog" aria-modal="true">${html}</div>`;document.body.appendChild(w);w.addEventListener('pointerdown',e=>{if(e.target===w)closeModal();});w.querySelectorAll('[data-close]').forEach(b=>b.onclick=closeModal);const f=w.querySelector('input,textarea');if(f)f.focus();return w;}
-function closeModal(){const m=document.querySelector('.modal-wrap');if(m)m.remove();}
+function closeModal(){const m=document.querySelector('.modal-wrap');if(m){m.remove();if(m.onclose)m.onclose();}}
+// Substitutos de prompt()/confirm(): resolvem com o valor, ou null/false ao cancelar (Esc, fora, ×).
+function askModal(body,{title,ok,danger},read){return new Promise(res=>{
+  const w=modal(`<form class="askform"><div class="modal-head"><h2>${esc(title)}</h2><button type="button" class="iconbtn" data-close aria-label="Fechar">${X}</button></div>
+    <div class="modal-body">${body}</div>
+    <div class="modal-foot"><button type="button" class="btn" data-close>Cancelar</button><button type="submit" class="btn ${danger?'danger solid':'primary'}">${esc(ok)}</button></div></form>`,'narrow ask');
+  let done=false;const end=v=>{if(!done){done=true;res(v);}};w.onclose=()=>end(read?null:false);
+  const inp=w.querySelector('input');if(inp)inp.select(); // o texto atual já vem selecionado
+  w.querySelector('form').onsubmit=e=>{e.preventDefault();const v=read?read(w):true;if(v===null)return;end(v);closeModal();};
+  // Ação destrutiva: o foco começa em Cancelar, para Enter não excluir por engano.
+  if(danger)w.querySelector('[data-close].btn').focus();});}
+const askText=({label,value='',max=200,...o})=>askModal(`<label class="field"><span class="lbl">${esc(label)}</span><input class="inp" name="v" maxlength="${max}" value="${esc(value)}" autocomplete="off"></label>`,o,
+  w=>{const v=w.querySelector('input').value.trim();return v||null;});
+const askConfirm=({text,...o})=>askModal(`<p class="ask-text">${text}</p>`,o);
 function marketModal(tab){const draw=()=>{const items=tab==='chars'?market.characters:market.backgrounds;
   const w=modal(`<div class="modal-head"><h2>Marketplace</h2><div class="tabs" style="width:250px"><button class="tab" data-mt="chars" aria-selected="${tab==='chars'}">Personagens</button><button class="tab" data-mt="bgs" aria-selected="${tab==='bgs'}">Backgrounds</button></div><button class="iconbtn" data-close aria-label="Fechar">${X}</button></div>
   <div class="modal-body"><div class="hint">Itens publicados por usuários. Ao incluir, uma cópia vai para esta história e passa a ser independente do original.</div><div class="mk-grid">${items.map((it,i)=>`<div class="mk-card" style="animation:rowpop .4s cubic-bezier(.2,1.4,.4,1) both;animation-delay:${i*50}ms"><div class="mk-art">${tab==='chars'?`<div class="strip">${it.sprites.slice(0,3).map(s=>`<img src="${s.img}" alt="">`).join('')}</div>`:`<img class="full" src="${it.img}" alt="">`}</div><div class="mk-info"><b style="color:${it.color||'inherit'}">${esc(it.name)}</b><span class="hint">${esc(it.desc)}</span>${tab==='chars'?`<span class="card-sub">${it.sprites.map(s=>esc(s.name)).join(' · ')}</span>`:''}<span class="card-sub">por ${esc(it.author)}</span><button class="btn sm primary" data-add="${i}" style="align-self:flex-start;margin-top:6px">Incluir na história</button></div></div>`).join('')}</div></div>`);
@@ -642,7 +655,8 @@ function completeText(s){if(gens.has(s.id))return;const prev=snapStr();const old
    com as propostas, por my_chat_message. A conversa fica no servidor e volta ao recarregar. */
 const log=$('#chatLog');
 function addMsg(html,who){const d=document.createElement('div');d.className='msg '+who;d.innerHTML=html;log.appendChild(d);log.scrollTop=log.scrollHeight;return d;}
-addMsg('Conheço o grafo, o elenco e os backgrounds desta história. Peça algo como <b>“crie a cena da ação sem destino”</b> ou <b>“continue a partir do final”</b>. Toda mudança chega como proposta para você aceitar.','bot');
+const CHAT_HELLO='Conheço o grafo, o elenco e os backgrounds desta história. Peça algo como <b>“crie a cena da ação sem destino”</b> ou <b>“continue a partir do final”</b>. Toda mudança chega como proposta para você aceitar.';
+addMsg(CHAT_HELLO,'bot');
 const chatJobs=new Map;const chatSeen=new Set; // jobId -> {el, next, held, text, done}
 function chatJob(jobId){let j=chatJobs.get(jobId);if(!j){j={el:addMsg('<span class="typingdots"><i></i><i></i><i></i></span>','bot'),next:0,held:new Map,text:'',done:false};chatJobs.set(jobId,j);}return j;}
 function onChatChunk(row){const j=chatJob(row.jobId);if(j.done)return;j.held.set(row.seq,row.text);
@@ -702,13 +716,21 @@ function drawPlay(){clearInterval(play.iv);const s=scene(play.cur);const n=s.cha
 /* ---------- tempo real (SpacetimeDB) ----------
    O grafo local é sempre: servidor ⊕ lotes em voo ⊕ edições ainda não enviadas.
    `base` = servidor ⊕ lotes em voo; o que o usuário mudou é diff(base, local).
+   A história aberta (open_story) define o que as views cur_* trazem; uma conta tem uma
+   história aberta por vez, então a aba que ganha o foco reabre a sua (reclaim).
    Personagens e backgrounds ficam só no cliente neste spike. */
 const STDB_URI=import.meta.env.VITE_STDB_URI||'ws://localhost:3000';
 const STDB_DB=import.meta.env.VITE_STDB_DB||'roteiro-spike';
+// Identidade anônima por aba, sem login (só com o módulo local publicado com AUTH_DEV_ANON=1).
+const DEV_ANON=import.meta.env.VITE_AUTH_DEV_ANON==='1';
 const TOKEN_KEY='stdb-token:'+STDB_URI+'/'+STDB_DB; // o token de um servidor não vale em outro
 const WHERE=/localhost|127\.0\.0\.1/.test(STDB_URI)?'local':'Maincloud';
-let conn=null,myId=null,myConn=null,connected=false,ready=false,resetting=false;
+let conn=null,myId=null,myConn=null,connected=false,ready=false,resetting=false,subsReady=false;
+let storyId='',myRole='',dragSub=null;
 let base=null;const inflight=[];let retryOps=[];
+const errMsg=err=>String(err&&err.message||err).slice(0,160);
+// As views ainda mostram esta história (outra aba da mesma conta pode ter aberto outra).
+const viewsMine=()=>!!(conn&&storyId&&conn.db.curStory.id.find(storyId));
 
 const emptyFlat=()=>({title:'',start:'',scenes:new Map,choices:new Map});
 const cloneFlat=f=>({title:f.title,start:f.start,scenes:new Map([...f.scenes].map(([k,v])=>[k,{...v}])),choices:new Map([...f.choices].map(([k,v])=>[k,{...v}]))});
@@ -716,9 +738,9 @@ function flatOf(st){const f=emptyFlat();f.title=st.title;f.start=st.start||'';
   for(const s of st.scenes){f.scenes.set(s.id,{title:s.title,x:Math.round(s.x),y:Math.round(s.y),bg:s.bg||'',chars:JSON.stringify(s.chars.map(x=>({c:x.c,s:x.s}))),kind:s.kind,speaker:s.speaker||'',text:s.text,next:s.next||'',ai:gens.has(s.id)?'generating':(s.aiStatus==='failed'&&s.text?'':(s.aiStatus||''))});
     s.choices.forEach((c,i)=>f.choices.set(c.id,{sceneId:s.id,label:c.label,target:c.target||'',position:i}));}
   return f;}
-function flatServer(){const f=emptyFlat();const st=[...conn.db.story.iter()].find(r=>r.id==='main');f.exists=!!st;if(st){f.title=st.title;f.start=st.startScene;}
-  for(const r of conn.db.scene.iter())f.scenes.set(r.id,{title:r.title,x:r.x,y:r.y,bg:r.bg,chars:r.chars,kind:r.kind,speaker:r.speaker,text:r.text,next:r.next,ai:r.ai});
-  for(const r of conn.db.choice.iter())f.choices.set(r.id,{sceneId:r.sceneId,label:r.label,target:r.target,position:r.position});
+function flatServer(){const f=emptyFlat();const st=conn.db.curStory.id.find(storyId);if(st){f.title=st.title;f.start=st.startScene;}
+  for(const r of conn.db.curScene.iter())f.scenes.set(r.id,{title:r.title,x:r.x,y:r.y,bg:r.bg,chars:r.chars,kind:r.kind,speaker:r.speaker,text:r.text,next:r.next,ai:r.ai});
+  for(const r of conn.db.curChoice.iter())f.choices.set(r.id,{sceneId:r.sceneId,label:r.label,target:r.target,position:r.position});
   return f;}
 // Mesma semântica do reducer: valores finais, campos parciais, seguro de repetir.
 function applyOps(f,ops){for(const o of ops){
@@ -758,17 +780,19 @@ function writeFlat(f){state.title=f.title;state.start=f.start;
     return s;});}
 
 /* envio */
-let syncQueued=false,syncTimer=0;
+let syncQueued=false,syncTimer=0,roAt=0;
 function scheduleSync(){if(syncQueued)return;syncQueued=true;queueMicrotask(()=>{syncQueued=false;syncNow();});}
 function syncSoon(){clearTimeout(syncTimer);syncTimer=setTimeout(syncNow,800);}
-function syncNow(){if(!base||!connected||resetting)return;const skip=drag&&drag.type==='move'?new Set(drag.orig.map(o=>o.s.id)):null;
+function syncNow(){if(!base||!connected||resetting||!viewsMine())return;const skip=drag&&drag.type==='move'?new Set(drag.orig.map(o=>o.s.id)):null;
   const ops=diffFlat(base,flatOf(state),skip);if(!ops.length)return;
+  // Leitor: a edição local volta ao estado do servidor.
+  if(myRole==='viewer'){writeFlat(cloneFlat(base));renderNodes();const n=Date.now();if(n-roAt>4000){roAt=n;toast('Você tem acesso só de leitura a esta história.','err');}return;}
   const touched=typingTouched||collector;for(const o of ops)touchKeys(o,base).forEach(k=>touched.add(k));
   applyOps(base,ops);const b={ops,t0:performance.now()};inflight.push(b);
-  conn.reducers.applyOperations({ops:JSON.stringify(ops)}).then(()=>{rtt.add('op',performance.now()-b.t0);settle(b);},err=>{settle(b);rejected(err,ops);});}
+  conn.reducers.applyOperations({storyId,ops:JSON.stringify(ops)}).then(()=>{rtt.add('op',performance.now()-b.t0);settle(b);},err=>{settle(b);rejected(err,ops);});}
 function settle(b){const i=inflight.indexOf(b);if(i>=0)inflight.splice(i,1);scheduleRebuild();}
-const ERRS={CYCLE:'Essa ligação fecharia um ciclo. Alguém pode ter criado o outro fio agora há pouco.',LOCKED:'Outra pessoa está escrevendo nesse campo.',START:'A cena inicial não pode ser excluída.',NO_START:'A história ficaria sem cena inicial.',BOTH:'Uma cena não pode ter ações e saída única ao mesmo tempo.',NOT_FOUND:'Essa cena foi apagada por outra pessoa.',TOO_MANY:'Uma cena tem no máximo 6 personagens.',DUP_CHAR:'Esse personagem já está na cena.',SPEAKER:'Quem fala precisa estar na cena.',INVALID:'Alteração inválida.'};
-function rejected(err,ops){const m=String(err&&err.message||err);const code=(m.match(/\b(CYCLE|LOCKED|START|NO_START|BOTH|NOT_FOUND|TOO_MANY|DUP_CHAR|SPEAKER|INVALID)\b(?::\d+(?::([\w-]+))?)?/)||[]);
+const ERRS={CYCLE:'Essa ligação fecharia um ciclo. Alguém pode ter criado o outro fio agora há pouco.',LOCKED:'Outra pessoa está escrevendo nesse campo.',START:'A cena inicial não pode ser excluída.',NO_START:'A história ficaria sem cena inicial.',BOTH:'Uma cena não pode ter ações e saída única ao mesmo tempo.',NOT_FOUND:'Essa cena foi apagada por outra pessoa.',TOO_MANY:'Uma cena tem no máximo 6 personagens.',DUP_CHAR:'Esse personagem já está na cena.',SPEAKER:'Quem fala precisa estar na cena.',INVALID:'Alteração inválida.',FORBIDDEN:'Você não tem permissão para essa alteração.'};
+function rejected(err,ops){const m=errMsg(err);const code=(m.match(/\b(CYCLE|LOCKED|START|NO_START|BOTH|NOT_FOUND|TOO_MANY|DUP_CHAR|SPEAKER|INVALID|FORBIDDEN)\b(?::\d+(?::([\w-]+))?)?/)||[]);
   if(code[1]){toast('Recusado pelo servidor: '+ERRS[code[1]],'err');if(code[2]&&scene(code[2]))nodeShake(code[2]);else shake();return;}
   // Queda de conexão: o lote pode ou não ter sido aplicado; como é seguro repetir, reenviamos depois.
   retryOps.push(ops);toast('Sem conexão — a alteração será reenviada ao reconectar.','err');}
@@ -777,7 +801,7 @@ function rejected(err,ops){const m=String(err&&err.message||err);const code=(m.m
 let rebuildQueued=false;
 // setTimeout, não requestAnimationFrame: abas em segundo plano não recebem frames e ficariam desatualizadas.
 function scheduleRebuild(){if(rebuildQueued)return;rebuildQueued=true;setTimeout(()=>{rebuildQueued=false;rebuild();},0);}
-function rebuild(){if(!conn||!ready)return;const srv=flatServer();
+function rebuild(){if(!conn||!ready||!viewsMine())return;const srv=flatServer();
   const unsent=base&&!resetting?diffFlat(base,flatOf(state),null):[];
   for(const b of inflight)applyOps(srv,b.ops);
   const local=cloneFlat(srv);for(const ops of retryOps)applyOps(local,ops);applyOps(local,unsent);
@@ -785,10 +809,15 @@ function rebuild(){if(!conn||!ready)return;const srv=flatServer();
   if(document.activeElement!==$('#storyTitle'))$('#storyTitle').value=state.title;
   if(hadRetry&&connected)scheduleSync();}
 
-function resetDemo(){if(!conn||!connected)return;resetting=true;undoS.length=0;redoS.length=0;syncUndo();gens.clear();lit.clear();
-  const ops=diffFlat(emptyFlat(),flatOf(SEED),null).filter(o=>o.op!=='set_title'&&o.op!=='set_start');
-  const t0=performance.now();
-  conn.reducers.resetStory({title:SEED.title,startScene:SEED.start,ops:JSON.stringify(ops)}).then(()=>{rtt.add('op',performance.now()-t0);resetting=false;base=null;state.scenes=[];rebuild();requestAnimationFrame(fitView);toast('História de exemplo restaurada');},err=>{resetting=false;toast('Falha ao reiniciar: '+(err&&err.message||err),'err');});}
+// O exemplo vira operações com ids novos: ids de cena e ação são globais no banco.
+function exampleGraph(){const ops=diffFlat(emptyFlat(),flatOf(SEED),null).filter(o=>o.op!=='set_title'&&o.op!=='set_start');
+  const ids=new Map;const re=(id,p)=>{if(!id)return id;if(!ids.has(id))ids.set(id,uid(p));return ids.get(id);};
+  for(const o of ops){if(o.op==='upsert_scene'){o.scene.id=re(o.scene.id,'s');o.scene.next=re(o.scene.next,'s');}
+    else if(o.op==='upsert_choice'){o.choice.id=re(o.choice.id,'c');o.choice.sceneId=re(o.choice.sceneId,'s');o.choice.target=re(o.choice.target,'s');}}
+  return{ops,start:re(SEED.start,'s')};}
+function resetExample(){if(!conn||!connected||!storyId)return;resetting=true;undoS.length=0;redoS.length=0;syncUndo();gens.clear();lit.clear();
+  const{ops,start}=exampleGraph();const t0=performance.now();
+  conn.reducers.resetStory({storyId,title:SEED.title,startScene:start,ops:JSON.stringify(ops)}).then(()=>{rtt.add('op',performance.now()-t0);resetting=false;base=null;state.scenes=[];rebuild();requestAnimationFrame(fitView);toast('História de exemplo restaurada');},err=>{resetting=false;toast('Falha ao reiniciar: '+errMsg(err),'err');});}
 
 /* latência */
 const rtt={op:[],ping:[],add(k,v){const a=this[k];a.push(v);if(a.length>200)a.shift();renderNet();}};
@@ -796,20 +825,16 @@ const pct=(a,p)=>{if(!a.length)return null;const s=[...a].sort((x,y)=>x-y);retur
 setInterval(()=>{if(!connected)return;const t0=performance.now();conn.reducers.ping({}).then(()=>rtt.add('ping',performance.now()-t0),()=>{});},2000);
 
 /* presença, cursores e arrasto ao vivo */
-const NAMES=['Ana','Bruno','Carla','Diego','Elisa','Fábio','Gabi','Heitor','Iara','João','Lara','Miguel'];
-const COLORS=['#f2a541','#5eead4','#a78bfa','#f472b6','#60a5fa','#4ade80','#fb7185','#facc15'];
-let me={name:sessionStorage.getItem('vn-name')||pick(NAMES),color:sessionStorage.getItem('vn-color')||pick(COLORS)};
-sessionStorage.setItem('vn-name',me.name);sessionStorage.setItem('vn-color',me.color);
 const hex=id=>id.toHexString();
-function profOf(identity){const p=conn&&[...conn.db.profile.iter()].find(r=>r.identity.isEqual(identity));return p?{name:p.name,color:p.color}:{name:'Alguém',color:'#9aa0aa'};}
+function profOf(identity){const p=conn&&conn.db.curProfile.identity.find(identity);return p?{name:p.name,color:p.color}:{name:'Alguém',color:'#9aa0aa'};}
 const isMine=cid=>myConn&&cid.isEqual(myConn);
-function lockOf(target){if(!conn)return null;for(const l of conn.db.locks.iter())if(l.target===target)return isMine(l.connectionId)?null:profOf(l.identity);return null;}
+function lockOf(target){if(!conn)return null;for(const l of conn.db.curLocks.iter())if(l.target===target)return isMine(l.connectionId)?null:profOf(l.identity);return null;}
 function lockBadge(p){return`<div class="lockbadge" style="--lc:${p.color}" role="status"><span class="ldot"></span>${esc(p.name)} está escrevendo…</div>`;}
 
 let lastDrag=0;
 function sendDrag(orig,done){if(!connected)return;const now=performance.now();if(!done&&now-lastDrag<50)return;lastDrag=now;
   conn.reducers.sendDrag({moves:JSON.stringify(orig.map(o=>[o.s.id,o.s.x,o.s.y])),done}).catch(()=>{});}
-function onRemoteDrag(row){if(isMine(row.connectionId))return;let moves;try{moves=JSON.parse(row.moves);}catch(_){return;}const p=profOf(row.identity);const now=performance.now();
+function onRemoteDrag(row){if(isMine(row.connectionId)||row.storyId!==storyId)return;let moves;try{moves=JSON.parse(row.moves);}catch(_){return;}const p=profOf(row.identity);const now=performance.now();
   for(const[id,x,y]of moves){const s=scene(id);if(!s)continue;let r=remoteDrag.get(id);
     if(!r){r={x:s.x,y:dispY(s),color:p.color,name:p.name};remoteDrag.set(id,r);const el=nodeEl(id);if(el){el.classList.add('rdrag');el.style.setProperty('--rc',p.color);el.dataset.who=p.name;}}
     Object.assign(r,{tx:x,ty:y,seen:now,done:row.done});}
@@ -828,73 +853,193 @@ function stepRemote(now){const dt=Math.min(250,lastStep?now-lastStep:16);lastSte
   for(const c of cursors.values()){c.x+=(c.tx-c.x)*k;c.y+=(c.ty-c.y)*k;c.el.style.transform=`translate(${c.x}px,${c.y}px) scale(${1/view.z})`;}}
 function syncCursors(){if(!conn)return;if(!cursorLayer){cursorLayer=document.createElement('div');cursorLayer.className='rcursors';world.appendChild(cursorLayer);}
   const live=new Set;
-  for(const p of conn.db.presence.iter()){const key=p.connectionId.toHexString();if(isMine(p.connectionId)||!p.hasCursor)continue;live.add(key);const pr=profOf(p.identity);let c=cursors.get(key);
+  for(const p of conn.db.curPresence.iter()){const key=p.connectionId.toHexString();if(isMine(p.connectionId)||!p.hasCursor)continue;live.add(key);const pr=profOf(p.identity);let c=cursors.get(key);
     if(!c){const el=document.createElement('div');el.className='rcursor';cursorLayer.appendChild(el);c={el,x:p.cursorX,y:p.cursorY};cursors.set(key,c);}
     c.tx=p.cursorX;c.ty=p.cursorY;c.el.style.setProperty('--cc',pr.color);c.el.innerHTML=`<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M1 1l5.5 13 2-5.5L14 6.5z"/></svg><span>${esc(pr.name)}</span>`;}
   for(const[k,c]of cursors)if(!live.has(k)){c.el.remove();cursors.delete(k);}}
 function renderPeople(){const host=$('#people');if(!host||!conn)return;const seen=new Map;
-  for(const p of conn.db.presence.iter()){const h=hex(p.identity);if(!seen.has(h))seen.set(h,{p,mine:myId&&p.identity.isEqual(myId)});}
+  for(const p of conn.db.curPresence.iter()){const h=hex(p.identity);if(!seen.has(h))seen.set(h,{p,mine:myId&&p.identity.isEqual(myId)});}
   const list=[...seen.values()].sort((a,b)=>b.mine-a.mine);
   host.innerHTML=list.map(({p,mine})=>{const pr=profOf(p.identity);return`<button class="pav${mine?' me':''}" data-conn="${p.connectionId.toHexString()}" style="--pc:${pr.color}" title="${esc(pr.name)}${mine?' (você) — clique para trocar o nome':' — clique para ir até o cursor'}">${esc(pr.name.slice(0,1).toUpperCase())}</button>`;}).join('')+`<span class="pcount">${list.length} na história</span>`;}
 document.addEventListener('click',e=>{const b=e.target.closest('.pav');if(!b)return;
-  if(b.classList.contains('me')){const n=prompt('Seu nome nesta aba:',me.name);if(n&&n.trim()){me.name=n.trim().slice(0,40);sessionStorage.setItem('vn-name',me.name);conn.reducers.setProfile({name:me.name,color:me.color});}return;}
+  if(b.classList.contains('me')){const me=profOf(myId);askText({title:'Seu nome',label:'como as outras pessoas veem você',value:me.name,max:40,ok:'Salvar'}).then(n=>{if(n&&n!==me.name)conn.reducers.setProfile({name:n,color:me.color}).catch(err=>toast('Não foi possível trocar o nome: '+errMsg(err),'err'));});return;}
   const c=cursors.get(b.dataset.conn);if(!c)return;const r=canvas.getBoundingClientRect();view.x=r.width/2-c.tx*view.z;view.y=r.height/2-c.ty*view.z;applyView();});
 let lastCur=0;
-canvas.addEventListener('pointermove',e=>{if(!connected)return;const now=performance.now();if(now-lastCur<50)return;lastCur=now;const p=toWorld(e.clientX,e.clientY);conn.reducers.updateCursor({x:p.x,y:p.y,visible:true}).catch(()=>{});});
-canvas.addEventListener('pointerleave',()=>{if(connected)conn.reducers.updateCursor({x:0,y:0,visible:false}).catch(()=>{});});
+canvas.addEventListener('pointermove',e=>{if(!connected||!storyId)return;const now=performance.now();if(now-lastCur<50)return;lastCur=now;const p=toWorld(e.clientX,e.clientY);conn.reducers.updateCursor({x:p.x,y:p.y,visible:true}).catch(()=>{});});
+canvas.addEventListener('pointerleave',()=>{if(connected&&storyId)conn.reducers.updateCursor({x:0,y:0,visible:false}).catch(()=>{});});
 
 /* trava suave de texto */
 let curLock=null;
-function fieldTarget(el){if(!el||!el.matches)return null;if(el.id==='storyTitle')return'story:title';const n=el.closest('.node');if(!n)return null;const a=el.dataset.act;
+function fieldTarget(el){if(!el||!el.matches)return null;if(el.id==='storyTitle')return storyId?`story:${storyId}:title`:null;const n=el.closest('.node');if(!n)return null;const a=el.dataset.act;
   if(a==='title'||a==='text')return`scene:${n.dataset.id}:${a}`;if(a==='clabel'){const c=scene(n.dataset.id)?.choices[+el.dataset.i];return c?`choice:${c.id}:label`:null;}return null;}
-function takeFieldLock(el){const t=fieldTarget(el);if(!t||!connected||(curLock&&curLock.target===t))return;if(curLock)releaseLock();curLock={target:t};
-  conn.reducers.lockField({target:t}).catch(err=>{if(!/LOCKED/.test(String(err&&err.message||err)))return;if(curLock&&curLock.target===t)curLock=null;const who=lockOf(t);toast(`${who?who.name:'Outra pessoa'} está escrevendo neste campo.`,'err');if(fieldTarget(document.activeElement)===t)document.activeElement.blur();});}
+function takeFieldLock(el){const t=fieldTarget(el);if(!t||!connected||myRole==='viewer'||(curLock&&curLock.target===t))return;if(curLock)releaseLock();curLock={target:t};
+  conn.reducers.lockField({target:t}).catch(err=>{if(!/LOCKED/.test(errMsg(err)))return;if(curLock&&curLock.target===t)curLock=null;const who=lockOf(t);toast(`${who?who.name:'Outra pessoa'} está escrevendo neste campo.`,'err');if(fieldTarget(document.activeElement)===t)document.activeElement.blur();});}
 function releaseLock(){if(!curLock)return;const t=curLock.target;curLock=null;if(connected)conn.reducers.releaseField({target:t}).catch(()=>{});}
 // Um re-render troca o elemento focado; só solta a trava se o foco saiu mesmo do campo.
 function dropFieldLock(el){const t=curLock&&curLock.target;setTimeout(()=>{if(t&&fieldTarget(document.activeElement)!==t){if(pendingSnap)endTyping();if(curLock&&curLock.target===t)releaseLock();}},0);}
 setInterval(()=>{if(!curLock||!connected)return;if(fieldTarget(document.activeElement)===curLock.target)conn.reducers.renewFieldLock({target:curLock.target}).catch(()=>{});else releaseLock();},5000);
 
-/* HUD: presença, rede e reinício */
-const hud=$('.hud');hud.insertAdjacentHTML('afterbegin','<div class="people" id="people"></div>');
+/* HUD: histórias, presença, compartilhar, rede e reinício */
+const hud=$('.hud');hud.insertAdjacentHTML('afterbegin','<button class="chip" id="btnHome" title="Voltar para suas histórias">← Histórias</button><div class="people" id="people"></div><button class="chip" id="btnShare" title="Pessoas com acesso a esta história">Compartilhar</button>');
 $('#stats').insertAdjacentHTML('beforebegin','<button class="chip net" id="net" title="Ida e volta até o SpacetimeDB">conectando…</button>');
-$('#btnAddScene').insertAdjacentHTML('beforebegin','<button class="zbtn" id="btnReset" title="Apaga tudo e recria a história de exemplo para todos">↺ demo</button><span class="zsep"></span>');
-$('#btnReset').onclick=()=>{if(confirm('Apagar tudo e recriar a história de exemplo para todos que estão conectados?'))resetDemo();};
+$('#btnAddScene').insertAdjacentHTML('beforebegin','<button class="zbtn" id="btnReset" title="Apaga as cenas desta história e recria o exemplo">↺ exemplo</button><span class="zsep"></span>');
+$('#btnReset').onclick=()=>askConfirm({title:'Recriar o exemplo',ok:'Apagar e recriar',danger:true,text:'Todas as cenas desta história são apagadas e trocadas pelo exemplo, para todas as pessoas que estão nela.'}).then(yes=>{if(yes)resetExample();});
+$('#btnHome').onclick=()=>navigate('/home');
+$('#btnShare').onclick=()=>shareModal();
 document.body.insertAdjacentHTML('beforeend','<div class="netbanner" id="netbanner" role="status" hidden></div>');
-let netState='connecting',retryIn=0;
+let netState='connecting',retryIn=0,netDownAt=0,leaving=false;
+// F5 ou navegação: o navegador fecha o WebSocket antes de trocar de página; não é queda de rede.
+addEventListener('pagehide',()=>{leaving=true;});
 function renderNet(){const el=$('#net');if(!el)return;const p50=pct(rtt.ping,.5),p95=pct(rtt.ping,.95),o50=pct(rtt.op,.5),o95=pct(rtt.op,.95);
   el.className='chip net '+netState;
   el.innerHTML=netState==='on'?`<span class="ndot"></span>${WHERE} · ping ${p50??'–'} ms <span class="dim">p95 ${p95??'–'}</span> · ações ${o50??'–'} ms <span class="dim">p95 ${o95??'–'} (n=${rtt.op.length})</span>`:netState==='off'?'<span class="ndot"></span>sem conexão':'<span class="ndot"></span>conectando…';
-  const b=$('#netbanner');b.hidden=netState==='on'||netState==='connecting';b.textContent=netState==='err'?`Não foi possível conectar a ${STDB_URI} (banco ${STDB_DB}).`:`Sem conexão — reconectando${retryIn?` em ${Math.ceil(retryIn/1000)} s`:''}…`;
+  // O aviso só aparece se a queda passar de 1 s: reconexões rápidas não piscam na tela.
+  const down=netState==='off'||netState==='err';if(!down)netDownAt=0;else if(!netDownAt){netDownAt=performance.now();setTimeout(renderNet,1000);}
+  const b=$('#netbanner');b.hidden=!down||performance.now()-netDownAt<950;b.textContent=netState==='err'?`Não foi possível conectar a ${STDB_URI} (banco ${STDB_DB}).`:`Sem conexão — reconectando${retryIn?` em ${Math.ceil(retryIn/1000)} s`:''}…`;
   appEl.classList.toggle('offline',netState!=='on');}
 $('#net').onclick=()=>{const all=rtt.op;toast(`Ações confirmadas: ${all.length} · p50 ${pct(all,.5)??'–'} ms · p95 ${pct(all,.95)??'–'} ms · máx ${all.length?Math.round(Math.max(...all)):'–'} ms. Meta da especificação: p95 ≤ 300 ms.`);};
 
-function onReady(){ready=true;const srv=flatServer();if(!srv.exists){resetDemo();return;}base=null;rebuild();renderPeople();syncCursors();requestAnimationFrame(fitView);
-  // Conversa salva no servidor: volta ao recarregar a aba (mesma identidade).
+/* ---------- histórias: lista, abrir e sair ---------- */
+const ROLE_LABEL={owner:'sua',editor:'pode editar',viewer:'só leitura'};
+const until=(fn,ms=5000)=>new Promise((res,rej)=>{const t0=performance.now();(function tick(){if(fn())return res();if(performance.now()-t0>ms)return rej(new Error('TIMEOUT'));setTimeout(tick,20);})();});
+const roleIn=id=>{const m=conn&&[...conn.db.myMemberships.iter()].find(r=>r.storyId===id);return m?m.role:'';};
+function editedAgo(ts){const m=Math.round((Date.now()-Number(ts.microsSinceUnixEpoch/1000n))/60000);
+  return m<1?'agora':m<60?`há ${m} min`:m<1440?`há ${Math.round(m/60)} h`:new Date(Number(ts.microsSinceUnixEpoch/1000n)).toLocaleDateString('pt-BR');}
+function renderHome(){const host=$('#stories');if(!host||!conn||!subsReady)return;
+  const list=[...conn.db.myStories.iter()].sort((a,b)=>Number(b.updatedAt.microsSinceUnixEpoch-a.updatedAt.microsSinceUnixEpoch));
+  host.innerHTML=list.length?list.map(s=>{const r=roleIn(s.id);return`<li class="story" data-id="${esc(s.id)}"><button class="sopen" data-act="open"><h3>${esc(s.title||'Sem título')}</h3><span class="meta">${ROLE_LABEL[r]||''} · editada ${editedAgo(s.updatedAt)}</span></button>${r!=='viewer'?'<button class="btn sm" data-act="rename">Renomear</button>':''}${r==='owner'?'<button class="btn sm danger" data-act="delete">Excluir</button>':'<button class="btn sm" data-act="leave">Sair</button>'}</li>`;}).join(''):'<li class="empty">Nenhuma história ainda. Crie a primeira ou comece pelo exemplo.</li>';
+  const a=[...conn.db.myAccount.iter()][0];$('#who').innerHTML=a?`${a.picture?`<img src="${esc(a.picture)}" alt="" referrerpolicy="no-referrer">`:''}<span>${esc(a.name||a.email)}</span>`:'';}
+$('#stories').onclick=e=>{const b=e.target.closest('[data-act]');const li=e.target.closest('.story');if(!b||!li)return;const id=li.dataset.id;const st=conn.db.myStories.id.find(id);if(!st)return;
+  if(b.dataset.act==='open')navigate('/s/'+id);
+  else if(b.dataset.act==='rename'){askText({title:'Renomear história',label:'título',value:st.title,ok:'Salvar'}).then(t=>{if(t&&t!==st.title)conn.reducers.renameStory({storyId:id,title:t}).catch(err=>toast('Não foi possível renomear: '+errMsg(err),'err'));});}
+  else if(b.dataset.act==='delete')askConfirm({title:'Excluir história',ok:'Excluir',danger:true,text:`<b>${esc(st.title||'Sem título')}</b> some para todas as pessoas com acesso, com todas as cenas e a conversa com a IA. Não dá para desfazer.`}).then(yes=>{if(yes)conn.reducers.deleteStory({storyId:id}).catch(err=>toast('Não foi possível excluir: '+errMsg(err),'err'));});
+  else if(b.dataset.act==='leave')askConfirm({title:'Sair da história',ok:'Sair',danger:true,text:`Você perde o acesso a <b>${esc(st.title||'Sem título')}</b> até ser convidado de novo.`}).then(yes=>{if(yes)conn.reducers.removeMember({storyId:id,userId:myId}).catch(err=>toast('Não foi possível sair: '+errMsg(err),'err'));});};
+function createStory(example){if(!connected)return;const id=uid('st');let title,start,ops;
+  if(example){({ops,start}=exampleGraph());title=SEED.title;}
+  else{start=uid('s');title='Nova história';ops=[{op:'upsert_scene',scene:{id:start,title:'Início',x:0,y:0,bg:'',chars:'[]',kind:'narration',speaker:'',text:'',next:'',ai:''}}];}
+  conn.reducers.createStory({id,title,startScene:start,ops:JSON.stringify(ops)}).then(()=>{navigate('/s/'+id);},err=>toast('Não foi possível criar: '+errMsg(err),'err'));}
+$('#btnNew').onclick=()=>createStory(false);
+$('#btnNewExample').onclick=()=>createStory(true);
+$('#btnLogout').onclick=()=>logout();
+
+function updateRole(){myRole=storyId?roleIn(storyId):'';const ro=myRole==='viewer';
+  appEl.classList.toggle('ro',ro);$('#storyTitle').readOnly=ro;$('#btnReset').hidden=myRole!=='owner';}
+function resetChat(){log.innerHTML='';chatJobs.clear();chatSeen.clear();addMsg(CHAT_HELLO,'bot');}
+// Esquece o grafo, o desfazer e a conversa da história anterior.
+function leaveStory(close=true){if(!storyId)return;releaseLock();
+  if(close&&connected)conn.reducers.closeStory({}).catch(()=>{});
+  if(dragSub){try{dragSub.unsubscribe();}catch(_){}dragSub=null;}
+  storyId='';myRole='';ready=false;base=null;inflight.length=0;retryOps=[];expanded=null;
+  undoS.length=0;redoS.length=0;gens.clear();lit.clear();remoteDrag.clear();for(const c of cursors.values())c.el.remove();cursors.clear();
+  state.scenes=[];state.title='';state.start='';closeModal();resetChat();renderAll();}
+function showHome(){leaveStory();$('#gate').hidden=true;$('#home').hidden=false;document.title='Roteiro VN';renderHome();}
+async function enterStory(id){$('#gate').hidden=true;$('#home').hidden=true;if(storyId===id)return;leaveStory(false);storyId=id;
+  try{await conn.reducers.openStory({storyId:id});await until(()=>storyId!==id||viewsMine());}
+  catch(err){if(storyId!==id)return;storyId='';toast(/NOT_FOUND/.test(errMsg(err))?'História não encontrada, ou você não tem acesso a ela.':'Não foi possível abrir: '+errMsg(err),'err');navigate('/home',true);return;}
+  if(storyId!==id)return; // trocou de história enquanto abria
+  document.documentElement.classList.remove('boot');
+  // Tabela de eventos: views não a cobrem, então o filtro vai na assinatura.
+  dragSub=conn.subscriptionBuilder().subscribe([`SELECT * FROM drags WHERE story_id = '${id}'`]);
+  updateRole();document.title=(conn.db.curStory.id.find(id)?.title||'História')+' · Roteiro VN';onReady();}
+/* rotas: /login, /home e /s/<id> (o Pages e o Vite devolvem o index.html para qualquer caminho) */
+const NEXT_KEY='roteiro:next';
+function navigate(path,replace){if(location.pathname!==path)history[replace?'replaceState':'pushState'](null,'',path);route();}
+function route(){const p=location.pathname;
+  // Sem login: tudo vai para /login, guardando para onde a pessoa queria ir.
+  if(!DEV_ANON&&!idToken){if(!authChecked){showLoading();return;}if(p!=='/login'){sessionStorage.setItem(NEXT_KEY,p);history.replaceState(null,'','/login');}showLogin();return;}
+  if(p==='/login'||p==='/'){const next=sessionStorage.getItem(NEXT_KEY);sessionStorage.removeItem(NEXT_KEY);history.replaceState(null,'',next&&next!=='/login'&&next!=='/'?next:'/home');return route();}
+  if(!conn||!subsReady){showLoading();return;} // a assinatura chama route() de novo
+  const m=p.match(/^\/s\/([\w-]{1,64})$/);if(m)enterStory(m[1]);
+  else{if(p!=='/home')history.replaceState(null,'','/home');showHome();}}
+addEventListener('popstate',route);
+// Links antigos (#/s/<id>) viram caminhos.
+{const m=location.hash.match(/^#\/s\/([\w-]{1,64})$/);if(m)history.replaceState(null,'','/s/'+m[1]);}
+// Outra aba da mesma conta abriu outra história: esta reabre a sua quando volta a ter foco.
+function reclaim(){if(storyId&&connected&&ready&&!viewsMine()&&roleIn(storyId))conn.reducers.openStory({storyId}).catch(()=>{});}
+addEventListener('focus',reclaim);document.addEventListener('visibilitychange',()=>{if(!document.hidden)reclaim();});
+
+/* compartilhar */
+function shareModal(){if(!storyId)return;modal(`<div class="modal-head"><h2>Compartilhar</h2><button class="iconbtn" data-close aria-label="Fechar">${X}</button></div><div class="modal-body" id="shareBody"></div><div class="modal-foot"><button class="btn" data-close>Fechar</button></div>`,'narrow');renderShare();}
+function renderShare(){const host=$('#shareBody');if(!host||!conn)return;const owner=myRole==='owner';
+  const acc=id=>conn.db.curAccount.identity.find(id);
+  const members=[...conn.db.curMember.iter()].sort((a,b)=>(b.role==='owner')-(a.role==='owner'));
+  const roleSel=(v,attrs)=>`<select class="inp share-role" ${attrs}><option value="editor"${v==='editor'?' selected':''}>pode editar</option><option value="viewer"${v==='viewer'?' selected':''}>só leitura</option></select>`;
+  host.innerHTML=(owner?`<form class="row" id="shareForm"><input class="inp" type="email" id="shareEmail" placeholder="e-mail da pessoa" required style="flex:1;min-width:180px">${roleSel('editor','id="shareRole"')}<button class="btn primary" type="submit">Convidar</button></form><div class="hint">Quem ainda não entrou recebe acesso no primeiro login com esse e-mail.</div>`:'')
+    +`<ul class="people-list">${members.map(m=>{const a=acc(m.userId);const me=myId&&m.userId.isEqual(myId);const who=a?(a.name||a.email):'—';
+      const right=m.role==='owner'?'<span class="meta">dono</span>':owner&&a&&a.email?`${roleSel(m.role,`data-email="${esc(a.email)}"`)}<button class="btn sm danger" data-remove="${hex(m.userId)}">Remover</button>`:`<span class="meta">${ROLE_LABEL[m.role]}</span>`;
+      return`<li><span class="pinfo"><b>${esc(who)}${me?' (você)':''}</b><span class="meta">${esc(a&&a.name?a.email:'')}</span></span>${right}</li>`;}).join('')}
+    ${[...conn.db.curInvite.iter()].map(v=>`<li><span class="pinfo"><b>${esc(v.email)}</b><span class="meta">convite pendente · ${ROLE_LABEL[v.role]}</span></span><button class="btn sm" data-cancel="${v.id}">Cancelar</button></li>`).join('')}</ul>`
+    +(!owner?`<div class="row"><button class="btn sm danger" id="shareLeave">Sair desta história</button></div>`:'');
+  const f=$('#shareForm');if(f)f.onsubmit=e=>{e.preventDefault();const email=$('#shareEmail').value.trim();
+    conn.reducers.shareStory({storyId,email,role:$('#shareRole').value}).then(()=>{$('#shareEmail')&&($('#shareEmail').value='');toast('Acesso dado a '+email);},err=>toast(/INVALID/.test(errMsg(err))?'E-mail inválido.':'Não foi possível convidar: '+errMsg(err),'err'));};
+  host.querySelectorAll('select[data-email]').forEach(s=>s.onchange=()=>conn.reducers.shareStory({storyId,email:s.dataset.email,role:s.value}).catch(err=>toast('Não foi possível mudar o acesso: '+errMsg(err),'err')));
+  host.querySelectorAll('[data-remove]').forEach(b=>b.onclick=()=>{const m=members.find(x=>hex(x.userId)===b.dataset.remove);if(m)conn.reducers.removeMember({storyId,userId:m.userId}).catch(err=>toast('Não foi possível remover: '+errMsg(err),'err'));});
+  host.querySelectorAll('[data-cancel]').forEach(b=>b.onclick=()=>conn.reducers.cancelInvite({id:BigInt(b.dataset.cancel)}).catch(()=>{}));
+  const lv=$('#shareLeave');if(lv)lv.onclick=()=>askConfirm({title:'Sair da história',ok:'Sair',danger:true,text:'Você perde o acesso a esta história até ser convidado de novo.'}).then(yes=>{if(yes)conn.reducers.removeMember({storyId,userId:myId}).catch(err=>toast('Não foi possível sair: '+errMsg(err),'err'));});}
+
+/* ---------- conta Google ----------
+   O login acontece nas Pages Functions (/api/auth/*, ver client/lib/oauth.js): o refresh token
+   fica num cookie HttpOnly e o navegador só recebe ID tokens de 1 h, guardados na memória.
+   Um F5 pega outro em /api/auth/token; antes de reconectar, o SDK pede outro a freshToken. */
+let idToken=null,authChecked=false;
+const LOGIN_ERRS={denied:'Você cancelou a autorização no Google.',state:'O login expirou ou veio de outra aba. Tente de novo.',exchange:'O Google recusou o login. Tente de novo.',no_refresh:'O Google não liberou o acesso contínuo. Tente de novo.',google:'O Google devolveu um erro. Tente de novo.'};
+// null = sem sessão (cookie ausente, expirado ou revogado).
+async function fetchToken(){const r=await fetch('/api/auth/token',{method:'POST',credentials:'same-origin'});
+  if(r.status===401)return null;if(!r.ok)throw new Error('AUTH_'+r.status);return(await r.json()).id_token||null;}
+function freshToken(){return fetchToken().then(t=>{if(!t){showGate('Sua sessão terminou. Entre de novo para continuar.',location.pathname);throw new Error('NO_SESSION');}idToken=t;return t;});}
+// O botão vai para o Google e volta para `next` (a página onde a pessoa estava).
+function showGate(msg,next){$('#gate').hidden=false;$('#gateMsg').textContent=msg||'';
+  $('#gateBtn').href='/api/auth/start?next='+encodeURIComponent(next||sessionStorage.getItem(NEXT_KEY)||'/home');}
+function showLogin(){leaveStory();$('#home').hidden=true;document.title='Entrar · Roteiro VN';
+  const err=new URLSearchParams(location.search).get('error');if(location.search)history.replaceState(null,'','/login');
+  showGate(err?LOGIN_ERRS[err]||'Não foi possível entrar. Tente de novo.':'');}
+function showLoading(){$('#gate').hidden=true;$('#home').hidden=false;$('#stories').innerHTML='<li class="empty">Carregando…</li>';}
+async function startAuth(){if(DEV_ANON){connect();route();return;}
+  route(); // carregando, enquanto confere a sessão
+  try{idToken=await fetchToken();}catch(_){authChecked=true;route();showGate('Não foi possível falar com o servidor de login. Tente de novo em instantes.');return;}
+  authChecked=true;if(idToken)connect();route();}
+async function logout(){if(DEV_ANON)sessionStorage.removeItem(TOKEN_KEY);else await fetch('/api/auth/logout',{method:'POST',credentials:'same-origin'}).catch(()=>{});
+  leaving=true;try{conn&&conn.disconnect();}catch(_){}sessionStorage.removeItem(NEXT_KEY);history.replaceState(null,'','/login');location.reload();}
+
+function onReady(){ready=true;base=null;rebuild();renderPeople();syncCursors();requestAnimationFrame(fitView);
+  // Conversa salva no servidor: volta ao recarregar a aba (mesma conta, mesma história).
   [...conn.db.myChatMessage.iter()].sort((a,b)=>Number(a.createdAt.microsSinceUnixEpoch-b.createdAt.microsSinceUnixEpoch)||(a.role==='user'?-1:1)).forEach(renderChatRow);}
 function connect(){
-  conn=DbConnection.builder().withUri(STDB_URI).withDatabaseName(STDB_DB).withToken(sessionStorage.getItem(TOKEN_KEY)||undefined).withAutomaticReconnect()
-    .onConnect((c,identity,token)=>{sessionStorage.setItem(TOKEN_KEY,token);myId=identity;myConn=c.connectionId;connected=true;netState='on';renderNet();
-      c.reducers.setProfile({name:me.name,color:me.color}).catch(()=>{});
+  const b=DbConnection.builder().withUri(STDB_URI).withDatabaseName(STDB_DB).withAutomaticReconnect();
+  if(DEV_ANON)b.withToken(sessionStorage.getItem(TOKEN_KEY)||undefined);else b.withToken(idToken).withTokenProvider(freshToken);
+  conn=b.onConnect((c,identity,token)=>{if(DEV_ANON)sessionStorage.setItem(TOKEN_KEY,token);myId=identity;myConn=c.connectionId;connected=true;netState='on';renderNet();
       const re=()=>scheduleRebuild();
-      for(const t of[c.db.story,c.db.scene,c.db.choice]){t.onInsert(re);t.onUpdate(re);t.onDelete(re);}
-      c.db.scene.onDelete((ctx,row)=>{const s=scene(row.id);if(s&&(expanded===row.id||nodeEl(row.id)?.contains(document.activeElement))&&!inflight.some(b=>b.ops.some(o=>o.op==='delete_scene'&&o.id===row.id)))toast(`A cena “${row.title}” foi apagada por outra pessoa.${s.text?' Seu texto: “'+s.text.slice(0,120)+'”':''}`,'err');});
-      const rl=()=>renderNodes();c.db.locks.onInsert(rl);c.db.locks.onUpdate(rl);c.db.locks.onDelete(rl);
-      const pp=()=>{renderPeople();syncCursors();};for(const t of[c.db.presence,c.db.profile]){t.onInsert(pp);t.onUpdate(pp);t.onDelete(pp);}
-      c.db.profile.onUpdate(()=>renderNodes());
+      for(const t of[c.db.curStory,c.db.curScene,c.db.curChoice]){t.onInsert(re);t.onUpdate(re);t.onDelete(re);}
+      c.db.curStory.onUpdate((_ctx,_old,row)=>{if(row.id===storyId)document.title=(row.title||'História')+' · Roteiro VN';});
+      c.db.curScene.onDelete((ctx,row)=>{const s=scene(row.id);if(viewsMine()&&s&&(expanded===row.id||nodeEl(row.id)?.contains(document.activeElement))&&!inflight.some(b=>b.ops.some(o=>o.op==='delete_scene'&&o.id===row.id)))toast(`A cena “${row.title}” foi apagada por outra pessoa.${s.text?' Seu texto: “'+s.text.slice(0,120)+'”':''}`,'err');});
+      const rl=()=>renderNodes();c.db.curLocks.onInsert(rl);c.db.curLocks.onUpdate(rl);c.db.curLocks.onDelete(rl);
+      const pp=()=>{renderPeople();syncCursors();};for(const t of[c.db.curPresence,c.db.curProfile]){t.onInsert(pp);t.onUpdate(pp);t.onDelete(pp);}
+      c.db.curProfile.onUpdate(()=>renderNodes());
+      const rs=()=>renderShare();for(const t of[c.db.curMember,c.db.curAccount,c.db.curInvite]){t.onInsert(rs);t.onUpdate(rs);t.onDelete(rs);}
+      const rh=()=>renderHome();for(const t of[c.db.myStories,c.db.myAccount]){t.onInsert(rh);t.onUpdate(rh);t.onDelete(rh);}
+      // Papel novo ou acesso removido (inclusive história excluída) na história aberta.
+      const mm=()=>{renderHome();if(!storyId)return;if(!roleIn(storyId)){toast('Você não tem mais acesso a esta história.','err');navigate('/home');return;}updateRole();renderShare();};
+      c.db.myMemberships.onInsert(mm);c.db.myMemberships.onUpdate(mm);c.db.myMemberships.onDelete(mm);
       c.db.drags.onInsert((_ctx,row)=>onRemoteDrag(row));
       c.db.chatChunk.onInsert((_ctx,row)=>onChatChunk(row));
       c.db.myAiJob.onInsert((_ctx,row)=>onJobRow(row));c.db.myAiJob.onUpdate((_ctx,_old,row)=>onJobRow(row));
-      c.db.myChatMessage.onInsert((_ctx,row)=>{if(ready)renderChatRow(row);});
-      c.subscriptionBuilder().onApplied(onReady).onError((_ctx,err)=>toast('Erro na assinatura: '+(err&&err.message||err),'err')).subscribe(['SELECT * FROM story','SELECT * FROM scene','SELECT * FROM choice','SELECT * FROM profile','SELECT * FROM presence','SELECT * FROM drags','SELECT * FROM locks',
+      c.db.myChatMessage.onInsert((_ctx,row)=>{if(ready&&row.storyId===storyId)renderChatRow(row);});
+      c.subscriptionBuilder().onApplied(()=>{subsReady=true;route();}).onError((_ctx,err)=>toast('Erro na assinatura: '+errMsg(err),'err')).subscribe([
+        'SELECT * FROM my_account','SELECT * FROM my_stories','SELECT * FROM my_memberships',
+        'SELECT * FROM cur_story','SELECT * FROM cur_scene','SELECT * FROM cur_choice','SELECT * FROM cur_presence','SELECT * FROM cur_locks',
+        'SELECT * FROM cur_member','SELECT * FROM cur_account','SELECT * FROM cur_profile','SELECT * FROM cur_invite',
         'SELECT * FROM my_ai_job','SELECT * FROM my_chat_message','SELECT * FROM chat_chunk WHERE requester = :sender']);})
-    .onAutomaticReconnect((c,identity,token)=>{sessionStorage.setItem(TOKEN_KEY,token);myId=identity;myConn=c.connectionId;connected=true;netState='on';renderNet();curLock=null;scheduleRebuild();scheduleSync();})
-    .onDisconnect((_ctx,_err,attempt,delayMs)=>{connected=false;netState='off';retryIn=attempt===undefined?0:delayMs||0;renderNet();})
-    .onConnectError((_ctx,err)=>{connected=false;netState='err';renderNet();console.error(err);})
+    // A presença nova volta para a história aberta (on_connect lê active_story); a assinatura é refeita pelo SDK.
+    .onAutomaticReconnect((c,identity,token)=>{if(DEV_ANON)sessionStorage.setItem(TOKEN_KEY,token);myId=identity;myConn=c.connectionId;connected=true;netState='on';renderNet();curLock=null;reclaim();scheduleRebuild();scheduleSync();})
+    .onDisconnect((_ctx,_err,attempt,delayMs)=>{if(leaving)return;connected=false;netState='off';retryIn=attempt===undefined?0:delayMs||0;renderNet();})
+    .onConnectError((_ctx,err)=>{connected=false;netState='err';renderNet();console.error(err);
+      // Token recusado na primeira conexão: o próximo login (onCredential) conecta de novo.
+      if(!DEV_ANON){conn=null;idToken=null;subsReady=false;route();showGate('O servidor recusou o login. Entre de novo.');}})
     .build();}
 
 /* ---------- boot ---------- */
-applyView();renderAll();renderNet();requestAnimationFrame(loop);connect();
+applyView();renderAll();renderNet();requestAnimationFrame(loop);startAuth();
 if(touchUI){let seen=false;try{seen=!!localStorage.getItem('roteiro:dica-toque');localStorage.setItem('roteiro:dica-toque','1');}catch(_){}
   if(!seen)setTimeout(()=>toast('Dica: segure uma saída ou “+ ação” para a IA criar. Arraste com um dedo para mover a tela, dois para zoom.','ai'),1200);}
 // Só em desenvolvimento: acesso para testes pelo console.
-if(import.meta.env.DEV)window.__spike={get conn(){return conn;},state,rtt,scene,inflight,refresh,pushUndo,undo,stepRemote,remoteDrag};
+if(import.meta.env.DEV)window.__spike={get conn(){return conn;},get storyId(){return storyId;},state,rtt,scene,inflight,refresh,pushUndo,undo,stepRemote,remoteDrag};

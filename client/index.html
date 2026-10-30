@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="pt-BR">
+<html lang="pt-BR" class="boot">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
@@ -70,6 +70,8 @@ button{cursor:pointer}
 .btn.violet:hover{border-color:var(--violet-hi);background:rgba(76,58,140,.3);box-shadow:0 0 14px rgba(167,139,250,.35);color:#f1eaff}
 .btn.violet.solid{background:var(--violet);border-color:var(--violet);color:#160f2c;font-weight:600}
 .btn.danger:hover{border-color:var(--red);color:#ff8a8a}
+.btn.danger.solid{background:var(--red);border-color:var(--red);color:#2b0b0e;font-weight:600}
+.btn.danger.solid:hover{background:#ff8585;border-color:#ff8585;color:#2b0b0e}
 .btn.sm{height:28px;padding:0 10px;font-size:12.5px;border-radius:6px}
 .inp{height:30px;background:var(--well);border:1px solid var(--line);border-radius:6px;color:var(--text);font-size:13px;padding:0 8px;width:100%;min-width:0;outline:none}
 .inp:focus{border-color:var(--amber)}
@@ -415,6 +417,45 @@ select.inp{padding:0 6px}
   .play .pcont{position:static;display:flex;justify-content:flex-end}
 }
 @media (prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important}}
+/* ---------- contas e histórias ---------- */
+.screen{position:fixed;inset:0;z-index:40;background:var(--ink);overflow:auto}
+.screen.center{display:grid;place-items:center;padding:16px}
+#gate{z-index:41} /* acima da lista: também é o aviso de sessão expirada */
+.screen[hidden]{display:none!important}
+.gate-card{background:var(--surface);border-radius:14px;box-shadow:inset 0 0 0 1px var(--line);padding:28px;width:min(380px,100%);display:flex;flex-direction:column;gap:14px;align-items:flex-start}
+.gate-card p{margin:0;color:var(--text-2);line-height:1.5}
+.gate-card .hint:empty{display:none}
+/* Botão no padrão do Google para tema escuro: fundo #131314, borda #8e918f, logo colorido. */
+.gbtn{height:40px;padding:0 14px 0 12px;border-radius:20px;background:#131314;border-color:#8e918f;color:#e3e3e3;font-weight:500;gap:10px;text-decoration:none}
+.gbtn:hover{border-color:#e3e3e3;color:#fff}
+.gbtn svg{width:18px;height:18px}
+.home-head{display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid var(--line-2)}
+.who{display:flex;align-items:center;gap:8px;color:var(--text-2);min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.who img{width:24px;height:24px;border-radius:50%;flex:none}
+.home-body{max-width:860px;margin:0 auto;padding:24px 16px}
+.home-top{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:16px}
+.home-top h1{margin:0;font-size:18px;font-weight:600}
+.stories{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px}
+.story{display:flex;align-items:center;gap:8px;background:var(--surface);border-radius:10px;box-shadow:inset 0 0 0 1px var(--line);padding:6px 10px 6px 6px;transition:box-shadow .12s}
+.story:hover{box-shadow:inset 0 0 0 1px var(--amber)}
+.sopen{flex:1;min-width:0;border:0;background:transparent;text-align:left;padding:8px;border-radius:7px;display:flex;flex-direction:column;gap:3px}
+.sopen h3{margin:0;font-size:14px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.meta{color:var(--muted);font-size:12px}
+.empty{color:var(--muted);padding:32px 0;text-align:center}
+.people-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px}
+.people-list li{display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--line-2)}
+.pinfo{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.pinfo b{font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.share-role{width:auto}
+.app.ro #btnAddScene,.app.ro #chatForm{display:none}
+/* askText/askConfirm: o form envolve cabeçalho, corpo e rodapé sem quebrar o flex do .modal */
+.askform{display:contents}
+.modal.ask{width:min(420px,100%)}
+.ask-text{margin:0;color:var(--text-2);line-height:1.55}
+.ask-text b{color:var(--text);font-weight:600}
+/* O editor está no HTML, então o navegador o pintaria (com os dois painéis abertos) antes do
+   script decidir a rota e o estado salvo dos painéis. Só aparece quando uma história abre. */
+.boot .app{visibility:hidden}
 </style>
 <link rel="stylesheet" href="/src/live.css">
 </head>
@@ -471,6 +512,31 @@ select.inp{padding:0 6px}
     <div class="chat-log" id="chatLog"></div>
     <form class="chat-form" id="chatForm"><textarea id="chatInput" placeholder="Peça uma mudança na história…" aria-label="Mensagem para a IA"></textarea><button class="btn violet solid" type="submit">Enviar</button></form>
   </aside>
+</div>
+<div class="screen center" id="gate" hidden>
+  <div class="gate-card">
+    <div class="brand"><strong>Roteiro</strong><span>visual novel</span></div>
+    <p>Entre com sua conta Google para ver e editar suas histórias.</p>
+    <a class="btn gbtn" id="gateBtn" href="/api/auth/start"><svg viewBox="0 0 48 48" aria-hidden="true"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg>Entrar com Google</a>
+    <p class="hint" id="gateMsg" role="status"></p>
+  </div>
+</div>
+<div class="screen" id="home" hidden>
+  <header class="home-head">
+    <div class="brand"><strong>Roteiro</strong><span>visual novel</span></div>
+    <span style="flex:1"></span>
+    <span class="who" id="who"></span>
+    <button class="btn sm" id="btnLogout">Sair</button>
+  </header>
+  <main class="home-body">
+    <div class="home-top">
+      <h1>Suas histórias</h1>
+      <span style="flex:1"></span>
+      <button class="btn" id="btnNewExample">Começar pelo exemplo</button>
+      <button class="btn primary" id="btnNew">+ Nova história</button>
+    </div>
+    <ul class="stories" id="stories"><li class="empty">Carregando…</li></ul>
+  </main>
 </div>
 <div class="toasts" id="toasts" aria-live="polite"></div>
 

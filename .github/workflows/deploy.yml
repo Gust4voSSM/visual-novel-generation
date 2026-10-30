@@ -6,8 +6,11 @@
 #   CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, SPACETIMEDB_TOKEN, WORKER_SECRET
 # Variáveis (mesma tela → Variables):
 #   STDB_DB (banco de produção no Maincloud), CF_PAGES_PROJECT,
+#   GOOGLE_CLIENT_ID (o módulo só aceita ID tokens emitidos para ele),
 #   AI_PROVIDER (opcional: mock | openai), AI_RATE_PER_MIN (opcional),
 #   STDB_DB_PREVIEW (opcional: banco das prévias; sem ele, usam STDB_DB)
+# Login (Pages Functions em client/functions): GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET e SESSION_KEY
+# ficam nas variáveis do projeto no Cloudflare Pages (Settings → Variables and Secrets), não aqui.
 name: deploy
 
 on:
@@ -59,21 +62,23 @@ jobs:
           spacetime --version
           spacetime login --token "$SPACETIMEDB_TOKEN"
 
-      # Sem break-clients nem delete-data: uma mudança de esquema que quebre clientes
-      # ou apague dados falha aqui, em vez de ser forçada.
+      # Projeto acadêmico: uma mudança de esquema que não dá para migrar APAGA os dados do banco
+      # (--delete-data=on-conflict) em vez de falhar. Publicações compatíveis mantêm os dados.
       - name: Publicar o módulo
         env:
           STDB_DB: ${{ vars.STDB_DB }}
           WORKER_SECRET: ${{ secrets.WORKER_SECRET }}
+          GOOGLE_CLIENT_ID: ${{ vars.GOOGLE_CLIENT_ID }}
           AI_PROVIDER: ${{ vars.AI_PROVIDER }}
           AI_RATE_PER_MIN: ${{ vars.AI_RATE_PER_MIN }}
         run: |
           test -n "$STDB_DB" || { echo "::error::Defina a variável STDB_DB"; exit 1; }
+          test -n "$GOOGLE_CLIENT_ID" || { echo "::error::Defina a variável GOOGLE_CLIENT_ID"; exit 1; }
           # Variáveis vazias viram "não definidas" para o módulo (AI_PROVIDER ausente = IA desligada).
           [ -n "$AI_PROVIDER" ] || unset AI_PROVIDER
           [ -n "$AI_RATE_PER_MIN" ] || unset AI_RATE_PER_MIN
           [ -n "$WORKER_SECRET" ] || unset WORKER_SECRET
-          spacetime publish -s maincloud -p server --yes=remote,migrate,skip-login --delete-data=never "$STDB_DB"
+          spacetime publish -s maincloud -p server --yes=remote,migrate,skip-login,delete-data --delete-data=on-conflict "$STDB_DB"
 
   client:
     needs: module
@@ -115,8 +120,10 @@ jobs:
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          # Roda em client/ para levar junto as Pages Functions (client/functions, login).
+          workingDirectory: client
           # A branch de produção do projeto no Pages deve ser "main"; as outras viram prévias.
-          command: pages deploy client/dist --project-name=${{ vars.CF_PAGES_PROJECT }} --branch=${{ github.head_ref || github.ref_name }} --commit-dirty=true
+          command: pages deploy dist --project-name=${{ vars.CF_PAGES_PROJECT }} --branch=${{ github.head_ref || github.ref_name }} --commit-dirty=true
 
       - name: Link do deploy
         run: |

@@ -5,22 +5,74 @@
 // ficam no cliente neste spike (ids fixos), então não são validados aqui.
 // IA (seção 2.6): procedures suggest_scene/complete_text e fila ai_job para o worker.
 // Com AI_PROVIDER=mock tudo responde com conteúdo simulado; sem AI_PROVIDER, AI_DISABLED.
+// Contas: login Google (o ID token é o token da conexão; o módulo confere iss e aud).
+// Cada história tem dono e membros; as tabelas do grafo são privadas e o cliente lê pelas
+// views cur_* (história aberta por ele em open_story) e my_* (as dele).
 import { schema, table, t, SenderError, ScheduleAt, type ReducerCtx, type ProcedureCtx, type InferSchema } from 'spacetimedb/server';
-import { Timestamp, TimeDuration } from 'spacetimedb';
+import { Identity, Timestamp, TimeDuration } from 'spacetimedb';
+
+// Quem entrou com Google. Privada: membros de uma mesma história se veem por cur_account.
+const account = table(
+  {},
+  {
+    identity: t.identity().primaryKey(),
+    email: t.string().index('btree'), // '' se o Google não confirmou o e-mail
+    name: t.string(),
+    picture: t.string(),
+    createdAt: t.timestamp(),
+    lastSeenAt: t.timestamp(),
+  }
+);
 
 const story = table(
-  { public: true },
+  {},
   {
-    id: t.string().primaryKey(),
+    id: t.string().primaryKey(), // gerado no cliente: repetir create_story não duplica
+    ownerId: t.identity().index('btree'),
     title: t.string(),
     startScene: t.string(),
+    createdAt: t.timestamp(),
+    updatedAt: t.timestamp(),
+  }
+);
+
+// Um par (storyId, userId) por linha; o dono também é membro, com role 'owner'.
+const storyMember = table(
+  {},
+  {
+    id: t.u64().primaryKey().autoInc(),
+    storyId: t.string().index('btree'),
+    userId: t.identity().index('btree'),
+    role: t.string(), // 'owner' | 'editor' | 'viewer'
+  }
+);
+
+// Convite para um e-mail que ainda não entrou; vira membro no primeiro login.
+const storyInvite = table(
+  {},
+  {
+    id: t.u64().primaryKey().autoInc(),
+    storyId: t.string().index('btree'),
+    email: t.string().index('btree'),
+    role: t.string(),
+    createdAt: t.timestamp(),
+  }
+);
+
+// História aberta por cada pessoa; define o que as views cur_* devolvem.
+const activeStory = table(
+  {},
+  {
+    identity: t.identity().primaryKey(),
+    storyId: t.string().index('btree'),
   }
 );
 
 const scene = table(
-  { public: true },
+  {},
   {
     id: t.string().primaryKey(),
+    storyId: t.string().index('btree'),
     title: t.string(),
     x: t.f64(),
     y: t.f64(),
@@ -36,9 +88,10 @@ const scene = table(
 );
 
 const choice = table(
-  { public: true },
+  {},
   {
     id: t.string().primaryKey(),
+    storyId: t.string().index('btree'),
     sceneId: t.string().index('btree'),
     label: t.string(),
     target: t.string(), // '' = ação sem destino (rascunho)
@@ -56,10 +109,11 @@ const profile = table(
 );
 
 const presence = table(
-  { public: true },
+  {},
   {
     connectionId: t.connectionId().primaryKey(),
-    identity: t.identity(),
+    identity: t.identity().index('btree'),
+    storyId: t.string().index('btree'), // '' = fora de qualquer história
     cursorX: t.f64(),
     cursorY: t.f64(),
     hasCursor: t.bool(),
@@ -67,10 +121,12 @@ const presence = table(
   }
 );
 
-// Tabela de eventos: as linhas chegam aos assinantes e não ficam salvas.
+// Tabela de eventos: as linhas chegam aos assinantes e não ficam salvas. Views não cobrem
+// tabelas de eventos, então é pública e o cliente assina WHERE story_id = '<id>'.
 const drags = table(
   { public: true, event: true },
   {
+    storyId: t.string(),
     connectionId: t.connectionId(),
     identity: t.identity(),
     moves: t.string(), // JSON [[sceneId, x, y], ...]
@@ -79,9 +135,10 @@ const drags = table(
 );
 
 const locks = table(
-  { public: true },
+  {},
   {
-    target: t.string().primaryKey(), // ex.: scene:<id>:text, choice:<id>:label
+    target: t.string().primaryKey(), // ex.: scene:<id>:text, choice:<id>:label, story:<id>:title
+    storyId: t.string().index('btree'),
     connectionId: t.connectionId(),
     identity: t.identity(),
     expiresAt: t.timestamp(),
@@ -103,6 +160,7 @@ const aiJob = table(
   {
     id: t.string().primaryKey(), // gerado no cliente: repetir o pedido não duplica
     requester: t.identity().index('btree'),
+    storyId: t.string().index('btree'),
     kind: t.string(), // 'chat' | 'character' | 'background'
     input: t.string(), // JSON
     status: t.string().index('btree'), // 'pending' | 'running' | 'done' | 'failed'
@@ -113,12 +171,13 @@ const aiJob = table(
   }
 );
 
-// Conversa e propostas; cada pessoa vê só a própria (view my_chat_message).
+// Conversa e propostas; cada pessoa vê só a própria, da história aberta (view my_chat_message).
 const chatMessage = table(
   {},
   {
     id: t.string().primaryKey(),
     user: t.identity().index('btree'),
+    storyId: t.string().index('btree'),
     jobId: t.string(),
     role: t.string(), // 'user' | 'assistant'
     content: t.string(),
@@ -157,10 +216,15 @@ const config = table(
 );
 
 const spacetimedb = schema(
-  { story, scene, choice, profile, presence, drags, locks, sweep, aiJob, chatMessage, chatChunk, aiRate, config },
+  {
+    account, story, storyMember, storyInvite, activeStory, scene, choice, profile, presence, drags, locks, sweep,
+    aiJob, chatMessage, chatChunk, aiRate, config,
+  },
   {
     // Definidos na publicação (variáveis de ambiente do shell). Sem AI_PROVIDER, a IA fica desabilitada.
     env: {
+      GOOGLE_CLIENT_ID: t.option(t.string()), // aud esperado no ID token do Google
+      AUTH_DEV_ANON: t.option(t.string()), // '1': aceita conexões anônimas (só local e testes, nunca em produção)
       AI_PROVIDER: t.option(t.string()), // 'mock' | 'openai' | 'google'
       AI_MOCK_LATENCY_URL: t.option(t.string()), // modo mock: endpoint lento que simula a latência do provedor
       AI_RATE_PER_MIN: t.option(t.string()),
@@ -170,12 +234,63 @@ const spacetimedb = schema(
 );
 export default spacetimedb;
 
-const STORY_ID = 'main';
 const MAX_CHARS = 6;
 const LOCK_MICROS = 15_000_000n;
 
 type Ctx = ReducerCtx<InferSchema<typeof spacetimedb>>;
 type PCtx = ProcedureCtx<InferSchema<typeof spacetimedb>>;
+type Db = Ctx['db'];
+// Só o que as views (somente leitura) e os reducers usam em comum.
+type MemberRow = { id: bigint; storyId: string; userId: Identity; role: string };
+type MemberDb = { storyMember: { userId: { filter(u: Identity): Iterable<MemberRow> } } };
+
+// ---------- contas ----------
+const GOOGLE_ISSUERS = new Set(['https://accounts.google.com', 'accounts.google.com']);
+const ROLE_RANK: Record<string, number> = { viewer: 0, editor: 1, owner: 2 };
+type Role = 'viewer' | 'editor' | 'owner';
+
+// Dados da conta se a conexão veio com um ID token do Google para este app; null caso contrário.
+// Sem conferir aud, um ID token emitido para qualquer outro app do Google seria aceito.
+function accountClaims(ctx: Ctx): { email: string; name: string; picture: string } | null {
+  const jwt = ctx.senderAuth.jwt;
+  if (jwt && GOOGLE_ISSUERS.has(jwt.issuer)) {
+    const aud = ctx.env.GOOGLE_CLIENT_ID;
+    if (!aud || !jwt.audience.includes(aud)) return null;
+    const p = jwt.fullPayload as Record<string, unknown>;
+    return {
+      email: p.email_verified === true ? String(p.email ?? '').toLowerCase() : '',
+      name: String(p.name ?? '').slice(0, 80),
+      picture: String(p.picture ?? '').slice(0, 500),
+    };
+  }
+  // Desenvolvimento e testes: identidade anônima com um e-mail fictício, para poder compartilhar.
+  if (ctx.env.AUTH_DEV_ANON === '1') return { email: `anon-${ctx.sender.toHexString().slice(0, 12)}@dev.local`, name: '', picture: '' };
+  return null;
+}
+
+function requireUser(ctx: Ctx) {
+  if (!accountClaims(ctx) || !ctx.db.account.identity.find(ctx.sender)) throw new SenderError('UNAUTHENTICATED');
+}
+
+function memberOf(db: MemberDb, storyId: string, user: Identity): MemberRow | undefined {
+  for (const m of db.storyMember.userId.filter(user)) if (m.storyId === storyId) return m;
+  return undefined;
+}
+
+const hasRole = (db: MemberDb, storyId: string, user: Identity, min: Role) => {
+  const m = memberOf(db, storyId, user);
+  return !!m && ROLE_RANK[m.role] >= ROLE_RANK[min];
+};
+
+// NOT_FOUND também para quem não é membro: não revela se a história existe.
+function requireRole(ctx: Ctx, storyId: string, min: Role) {
+  requireUser(ctx);
+  const st = ctx.db.story.id.find(storyId);
+  const m = st && memberOf(ctx.db, storyId, ctx.sender);
+  if (!st || !m) throw new SenderError('NOT_FOUND');
+  if (ROLE_RANK[m.role] < ROLE_RANK[min]) throw new SenderError('FORBIDDEN');
+  return st;
+}
 
 // ---------- operações ----------
 // Cada operação grava valores finais, então repetir o mesmo lote é seguro.
@@ -201,15 +316,29 @@ function lockedByOther(ctx: Ctx, target: string): boolean {
   return !ctx.connectionId || !l.connectionId.isEqual(ctx.connectionId);
 }
 
-function applyOp(ctx: Ctx, o: Op, i: number) {
+// Ids de cena e ação são globais: um lote só mexe em linhas da própria história.
+function ownScene(ctx: Ctx, storyId: string, id: string, i: number) {
+  const cur = ctx.db.scene.id.find(id);
+  if (cur && cur.storyId !== storyId) fail('FORBIDDEN', i, id);
+  return cur;
+}
+
+function ownChoice(ctx: Ctx, storyId: string, id: string, i: number) {
+  const cur = ctx.db.choice.id.find(id);
+  if (cur && cur.storyId !== storyId) fail('FORBIDDEN', i, id);
+  return cur;
+}
+
+function applyOp(ctx: Ctx, storyId: string, o: Op, i: number) {
   switch (o.op) {
     case 'upsert_scene': {
-      const cur = ctx.db.scene.id.find(o.scene.id);
+      if (typeof o.scene?.id !== 'string' || !o.scene.id || o.scene.id.length > 64) fail('INVALID', i);
+      const cur = ownScene(ctx, storyId, o.scene.id, i);
       for (const f of TEXT_FIELDS)
         if (f in o.scene && cur && (cur as any)[f] !== o.scene[f] && lockedByOther(ctx, `scene:${o.scene.id}:${f}`))
           fail('LOCKED', i, o.scene.id);
       const base = cur ?? {
-        id: o.scene.id, title: 'Nova cena', x: 0, y: 0, bg: '', chars: '[]', kind: 'narration',
+        id: o.scene.id, storyId, title: 'Nova cena', x: 0, y: 0, bg: '', chars: '[]', kind: 'narration',
         speaker: '', text: '', next: '', ai: '', updatedBy: ctx.sender,
       };
       const row: any = { ...base, updatedBy: ctx.sender };
@@ -220,38 +349,39 @@ function applyOp(ctx: Ctx, o: Op, i: number) {
       break;
     }
     case 'delete_scene': {
-      const st = ctx.db.story.id.find(STORY_ID);
+      const st = ctx.db.story.id.find(storyId);
       if (st && st.startScene === o.id) fail('START', i);
-      if (!ctx.db.scene.id.find(o.id)) break; // já apagada: nada a fazer
+      if (!ownScene(ctx, storyId, o.id, i)) break; // já apagada: nada a fazer
       ctx.db.scene.id.delete(o.id);
       for (const c of [...ctx.db.choice.sceneId.filter(o.id)]) ctx.db.choice.id.delete(c.id);
       // Excluir uma cena zera os destinos que apontam para ela.
-      for (const s of [...ctx.db.scene.iter()]) if (s.next === o.id) ctx.db.scene.id.update({ ...s, next: '' });
-      for (const c of [...ctx.db.choice.iter()]) if (c.target === o.id) ctx.db.choice.id.update({ ...c, target: '' });
+      for (const s of [...ctx.db.scene.storyId.filter(storyId)]) if (s.next === o.id) ctx.db.scene.id.update({ ...s, next: '' });
+      for (const c of [...ctx.db.choice.storyId.filter(storyId)]) if (c.target === o.id) ctx.db.choice.id.update({ ...c, target: '' });
       break;
     }
     case 'upsert_choice': {
-      const cur = ctx.db.choice.id.find(o.choice.id);
+      if (typeof o.choice?.id !== 'string' || !o.choice.id || o.choice.id.length > 64) fail('INVALID', i);
+      const cur = ownChoice(ctx, storyId, o.choice.id, i);
       if ('label' in o.choice && cur && cur.label !== o.choice.label && lockedByOther(ctx, `choice:${o.choice.id}:label`))
         fail('LOCKED', i, o.choice.id);
-      const row: any = { ...(cur ?? { id: o.choice.id, sceneId: '', label: '', target: '', position: 0 }) };
+      const row: any = { ...(cur ?? { id: o.choice.id, storyId, sceneId: '', label: '', target: '', position: 0 }) };
       for (const f of ['sceneId', 'label', 'target', 'position']) if (f in o.choice) row[f] = o.choice[f] ?? (f === 'position' ? 0 : '');
       if (cur) ctx.db.choice.id.update(row);
       else ctx.db.choice.insert(row);
       break;
     }
     case 'delete_choice':
-      ctx.db.choice.id.delete(o.id);
+      if (ownChoice(ctx, storyId, o.id, i)) ctx.db.choice.id.delete(o.id);
       break;
     case 'set_start': {
-      const st = ctx.db.story.id.find(STORY_ID);
+      const st = ctx.db.story.id.find(storyId);
       if (st) ctx.db.story.id.update({ ...st, startScene: o.id });
       break;
     }
     case 'set_title': {
-      if (lockedByOther(ctx, 'story:title')) fail('LOCKED', i, 'story');
-      const st = ctx.db.story.id.find(STORY_ID);
-      if (st) ctx.db.story.id.update({ ...st, title: o.title });
+      if (lockedByOther(ctx, `story:${storyId}:title`)) fail('LOCKED', i, 'story');
+      const st = ctx.db.story.id.find(storyId);
+      if (st) ctx.db.story.id.update({ ...st, title: String(o.title ?? '').slice(0, 200) });
       break;
     }
     default:
@@ -260,12 +390,15 @@ function applyOp(ctx: Ctx, o: Op, i: number) {
 }
 
 // Regras do grafo e da cena, contra o estado já com o lote aplicado.
-function validate(ctx: Ctx) {
-  const st = ctx.db.story.id.find(STORY_ID);
-  if (!st || !ctx.db.scene.id.find(st.startScene)) fail('NO_START', 0);
+// Só a história do lote: as outras não mudaram e não pesam no custo.
+function validate(ctx: Ctx, storyId: string) {
+  const st = ctx.db.story.id.find(storyId);
+  const start = st && ctx.db.scene.id.find(st.startScene);
+  if (!start || start.storyId !== storyId) fail('NO_START', 0);
+  const scenes = [...ctx.db.scene.storyId.filter(storyId)];
   const outs = new Map<string, string[]>();
-  for (const s of ctx.db.scene.iter()) outs.set(s.id, []);
-  for (const s of ctx.db.scene.iter()) {
+  for (const s of scenes) outs.set(s.id, []);
+  for (const s of scenes) {
     const ch = [...ctx.db.choice.sceneId.filter(s.id)];
     if (ch.length && s.next) fail('BOTH', 0, s.id);
     if (s.next) {
@@ -286,7 +419,7 @@ function validate(ctx: Ctx) {
     if (s.kind !== 'narration' && s.kind !== 'dialogue') fail('INVALID', 0, s.id);
     if (s.kind === 'dialogue' && !cast.some(x => x.c === s.speaker)) fail('SPEAKER', 0, s.id);
   }
-  for (const c of ctx.db.choice.iter()) if (!outs.has(c.sceneId)) fail('NOT_FOUND', 0, c.id);
+  for (const c of ctx.db.choice.storyId.filter(storyId)) if (!outs.has(c.sceneId)) fail('NOT_FOUND', 0, c.id);
   // Grafo acíclico: DFS com cores.
   const color = new Map<string, number>();
   const visit = (id: string): void => {
@@ -301,33 +434,210 @@ function validate(ctx: Ctx) {
   for (const id of outs.keys()) if (!color.get(id)) visit(id);
 }
 
-export const apply_operations = spacetimedb.reducer({ ops: t.string() }, (ctx, { ops }) => {
+function parseOps(ops: string): Op[] {
   let list: Op[];
   try { list = JSON.parse(ops); } catch { fail('INVALID', 0); }
   if (!Array.isArray(list)) fail('INVALID', 0);
-  list.forEach((o, i) => applyOp(ctx, o, i));
-  validate(ctx);
+  return list;
+}
+
+function touchStory(ctx: Ctx, storyId: string) {
+  const st = ctx.db.story.id.find(storyId);
+  if (st) ctx.db.story.id.update({ ...st, updatedAt: ctx.timestamp });
+}
+
+export const apply_operations = spacetimedb.reducer({ storyId: t.string(), ops: t.string() }, (ctx, { storyId, ops }) => {
+  requireRole(ctx, storyId, 'editor');
+  parseOps(ops).forEach((o, i) => applyOp(ctx, storyId, o, i));
+  validate(ctx, storyId);
+  touchStory(ctx, storyId);
 });
 
-// Apaga tudo e recria a história de exemplo enviada pelo cliente.
-export const reset_story = spacetimedb.reducer(
-  { title: t.string(), startScene: t.string(), ops: t.string() },
-  (ctx, { title, startScene, ops }) => {
-    for (const c of [...ctx.db.choice.iter()]) ctx.db.choice.id.delete(c.id);
-    for (const s of [...ctx.db.scene.iter()]) ctx.db.scene.id.delete(s.id);
-    for (const l of [...ctx.db.locks.iter()]) ctx.db.locks.target.delete(l.target);
-    const st = ctx.db.story.id.find(STORY_ID);
-    if (st) ctx.db.story.id.update({ id: STORY_ID, title, startScene });
-    else ctx.db.story.insert({ id: STORY_ID, title, startScene });
-    const list: Op[] = JSON.parse(ops);
-    list.forEach((o, i) => applyOp(ctx, o, i));
-    validate(ctx);
+// ---------- histórias ----------
+function clearGraph(ctx: Ctx, storyId: string) {
+  for (const c of [...ctx.db.choice.storyId.filter(storyId)]) ctx.db.choice.id.delete(c.id);
+  for (const s of [...ctx.db.scene.storyId.filter(storyId)]) ctx.db.scene.id.delete(s.id);
+  for (const l of [...ctx.db.locks.storyId.filter(storyId)]) ctx.db.locks.target.delete(l.target);
+}
+
+// Cria a história com o grafo inicial (o cliente manda uma cena vazia ou o exemplo).
+export const create_story = spacetimedb.reducer(
+  { id: t.string(), title: t.string(), startScene: t.string(), ops: t.string() },
+  (ctx, { id, title, startScene, ops }) => {
+    requireUser(ctx);
+    if (!id || id.length > 64) throw new SenderError('INVALID');
+    const cur = ctx.db.story.id.find(id);
+    if (cur) {
+      if (cur.ownerId.isEqual(ctx.sender)) return; // reenvio após queda de conexão
+      throw new SenderError('INVALID');
+    }
+    ctx.db.story.insert({
+      id, ownerId: ctx.sender, title: title.slice(0, 200) || 'Sem título', startScene,
+      createdAt: ctx.timestamp, updatedAt: ctx.timestamp,
+    });
+    ctx.db.storyMember.insert({ id: 0n, storyId: id, userId: ctx.sender, role: 'owner' });
+    parseOps(ops).forEach((o, i) => applyOp(ctx, id, o, i));
+    validate(ctx, id);
   }
 );
 
+export const rename_story = spacetimedb.reducer({ storyId: t.string(), title: t.string() }, (ctx, { storyId, title }) => {
+  const st = requireRole(ctx, storyId, 'editor');
+  if (lockedByOther(ctx, `story:${storyId}:title`)) throw new SenderError('LOCKED');
+  ctx.db.story.id.update({ ...st, title: title.slice(0, 200), updatedAt: ctx.timestamp });
+});
+
+// Apaga o grafo da história e recria a partir do lote enviado (o exemplo do cliente).
+export const reset_story = spacetimedb.reducer(
+  { storyId: t.string(), title: t.string(), startScene: t.string(), ops: t.string() },
+  (ctx, { storyId, title, startScene, ops }) => {
+    const st = requireRole(ctx, storyId, 'owner');
+    clearGraph(ctx, storyId);
+    ctx.db.story.id.update({ ...st, title: title.slice(0, 200), startScene, updatedAt: ctx.timestamp });
+    parseOps(ops).forEach((o, i) => applyOp(ctx, storyId, o, i));
+    validate(ctx, storyId);
+  }
+);
+
+export const delete_story = spacetimedb.reducer({ storyId: t.string() }, (ctx, { storyId }) => {
+  requireRole(ctx, storyId, 'owner');
+  clearGraph(ctx, storyId);
+  for (const m of [...ctx.db.storyMember.storyId.filter(storyId)]) ctx.db.storyMember.id.delete(m.id);
+  for (const v of [...ctx.db.storyInvite.storyId.filter(storyId)]) ctx.db.storyInvite.id.delete(v.id);
+  for (const o of [...ctx.db.activeStory.storyId.filter(storyId)]) ctx.db.activeStory.identity.delete(o.identity);
+  for (const p of [...ctx.db.presence.storyId.filter(storyId)]) ctx.db.presence.connectionId.update({ ...p, storyId: '' });
+  // Pedidos em andamento somem também: complete_job/fail_job do worker caem em NOT_FOUND.
+  for (const j of [...ctx.db.aiJob.storyId.filter(storyId)]) ctx.db.aiJob.id.delete(j.id);
+  for (const m of [...ctx.db.chatMessage.storyId.filter(storyId)]) ctx.db.chatMessage.id.delete(m.id);
+  ctx.db.story.id.delete(storyId);
+});
+
+// ---------- compartilhamento ----------
+const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
+
+function addMember(ctx: Ctx, storyId: string, userId: Identity, role: string) {
+  const m = memberOf(ctx.db, storyId, userId);
+  if (m?.role === 'owner') return; // o dono não perde a posse por um convite
+  if (m) ctx.db.storyMember.id.update({ ...m, role });
+  else ctx.db.storyMember.insert({ id: 0n, storyId, userId, role });
+}
+
+// Quem já entrou vira membro na hora; os demais recebem um convite pelo e-mail.
+export const share_story = spacetimedb.reducer(
+  { storyId: t.string(), email: t.string(), role: t.string() },
+  (ctx, { storyId, email, role }) => {
+    requireRole(ctx, storyId, 'owner');
+    if (role !== 'editor' && role !== 'viewer') throw new SenderError('INVALID');
+    const e = email.trim().toLowerCase();
+    if (!EMAIL_RE.test(e) || e.length > 200) throw new SenderError('INVALID');
+    const acc = [...ctx.db.account.email.filter(e)][0];
+    if (acc) return addMember(ctx, storyId, acc.identity, role);
+    const inv = [...ctx.db.storyInvite.email.filter(e)].find(v => v.storyId === storyId);
+    if (inv) ctx.db.storyInvite.id.update({ ...inv, role });
+    else ctx.db.storyInvite.insert({ id: 0n, storyId, email: e, role, createdAt: ctx.timestamp });
+  }
+);
+
+// O dono remove qualquer membro; um membro pode sair sozinho. O dono não sai.
+export const remove_member = spacetimedb.reducer({ storyId: t.string(), userId: t.identity() }, (ctx, { storyId, userId }) => {
+  requireRole(ctx, storyId, userId.isEqual(ctx.sender) ? 'viewer' : 'owner');
+  const m = memberOf(ctx.db, storyId, userId);
+  if (!m) return;
+  if (m.role === 'owner') throw new SenderError('INVALID');
+  ctx.db.storyMember.id.delete(m.id);
+  const o = ctx.db.activeStory.identity.find(userId);
+  if (o && o.storyId === storyId) ctx.db.activeStory.identity.delete(userId);
+  for (const p of [...ctx.db.presence.identity.filter(userId)])
+    if (p.storyId === storyId) ctx.db.presence.connectionId.update({ ...p, storyId: '' });
+});
+
+export const cancel_invite = spacetimedb.reducer({ id: t.u64() }, (ctx, { id }) => {
+  const v = ctx.db.storyInvite.id.find(id);
+  if (!v) return;
+  requireRole(ctx, v.storyId, 'owner');
+  ctx.db.storyInvite.id.delete(id);
+});
+
+// A história aberta decide o que as views cur_* devolvem e onde fica a presença desta aba.
+// Uma conta tem uma só história aberta: outra aba que abrir outra história troca para todas.
+export const open_story = spacetimedb.reducer({ storyId: t.string() }, (ctx, { storyId }) => {
+  requireRole(ctx, storyId, 'viewer');
+  const row = { identity: ctx.sender, storyId };
+  if (ctx.db.activeStory.identity.find(ctx.sender)) ctx.db.activeStory.identity.update(row);
+  else ctx.db.activeStory.insert(row);
+  const p = ctx.connectionId && ctx.db.presence.connectionId.find(ctx.connectionId);
+  if (p && p.storyId !== storyId) ctx.db.presence.connectionId.update({ ...p, storyId, hasCursor: false });
+});
+
+export const close_story = spacetimedb.reducer(ctx => {
+  ctx.db.activeStory.identity.delete(ctx.sender);
+  const p = ctx.connectionId && ctx.db.presence.connectionId.find(ctx.connectionId);
+  if (p) ctx.db.presence.connectionId.update({ ...p, storyId: '', hasCursor: false });
+});
+
+// ---------- views ----------
+// História aberta, se a pessoa ainda for membro dela; '' caso contrário.
+function curStoryId(ctx: { sender: Identity; db: any }): string {
+  const o = ctx.db.activeStory.identity.find(ctx.sender);
+  return o && memberOf(ctx.db, o.storyId, ctx.sender) ? o.storyId : '';
+}
+
+export const my_stories = spacetimedb.view({ public: true }, t.array(story.rowType), ctx =>
+  [...ctx.db.storyMember.userId.filter(ctx.sender)].map(m => ctx.db.story.id.find(m.storyId)!).filter(Boolean)
+);
+export const my_memberships = spacetimedb.view({ public: true }, t.array(storyMember.rowType), ctx => [
+  ...ctx.db.storyMember.userId.filter(ctx.sender),
+]);
+export const my_account = spacetimedb.view({ public: true }, t.array(account.rowType), ctx => {
+  const a = ctx.db.account.identity.find(ctx.sender);
+  return a ? [a] : [];
+});
+export const cur_story = spacetimedb.view({ public: true }, t.array(story.rowType), ctx => {
+  const id = curStoryId(ctx);
+  const st = id ? ctx.db.story.id.find(id) : undefined;
+  return st ? [st] : [];
+});
+export const cur_scene = spacetimedb.view({ public: true }, t.array(scene.rowType), ctx => {
+  const id = curStoryId(ctx);
+  return id ? [...ctx.db.scene.storyId.filter(id)] : [];
+});
+export const cur_choice = spacetimedb.view({ public: true }, t.array(choice.rowType), ctx => {
+  const id = curStoryId(ctx);
+  return id ? [...ctx.db.choice.storyId.filter(id)] : [];
+});
+export const cur_presence = spacetimedb.view({ public: true }, t.array(presence.rowType), ctx => {
+  const id = curStoryId(ctx);
+  return id ? [...ctx.db.presence.storyId.filter(id)] : [];
+});
+export const cur_locks = spacetimedb.view({ public: true }, t.array(locks.rowType), ctx => {
+  const id = curStoryId(ctx);
+  return id ? [...ctx.db.locks.storyId.filter(id)] : [];
+});
+export const cur_member = spacetimedb.view({ public: true }, t.array(storyMember.rowType), ctx => {
+  const id = curStoryId(ctx);
+  return id ? [...ctx.db.storyMember.storyId.filter(id)] : [];
+});
+// Nome, e-mail e foto de quem divide a história aberta com a pessoa.
+export const cur_account = spacetimedb.view({ public: true }, t.array(account.rowType), ctx => {
+  const id = curStoryId(ctx);
+  if (!id) return [];
+  return [...ctx.db.storyMember.storyId.filter(id)].map(m => ctx.db.account.identity.find(m.userId)!).filter(Boolean);
+});
+// Nome e cor nos cursores e travas: a própria pessoa e os membros da história aberta.
+export const cur_profile = spacetimedb.view({ public: true }, t.array(profile.rowType), ctx => {
+  const id = curStoryId(ctx);
+  const ids = id ? [...ctx.db.storyMember.storyId.filter(id)].map(m => m.userId) : [ctx.sender];
+  return ids.map(u => ctx.db.profile.identity.find(u)!).filter(Boolean);
+});
+export const cur_invite = spacetimedb.view({ public: true }, t.array(storyInvite.rowType), ctx => {
+  const id = curStoryId(ctx);
+  return id && hasRole(ctx.db, id, ctx.sender, 'owner') ? [...ctx.db.storyInvite.storyId.filter(id)] : [];
+});
+
 // ---------- presença ----------
 export const set_profile = spacetimedb.reducer({ name: t.string(), color: t.string() }, (ctx, { name, color }) => {
-  const row = { identity: ctx.sender, name: name.slice(0, 40) || 'Anônimo', color };
+  requireUser(ctx);
+  const row = { identity: ctx.sender, name: name.slice(0, 40) || 'Anônimo', color: color.slice(0, 20) };
   if (ctx.db.profile.identity.find(ctx.sender)) ctx.db.profile.identity.update(row);
   else ctx.db.profile.insert(row);
 });
@@ -335,20 +645,34 @@ export const set_profile = spacetimedb.reducer({ name: t.string(), color: t.stri
 export const update_cursor = spacetimedb.reducer({ x: t.f64(), y: t.f64(), visible: t.bool() }, (ctx, { x, y, visible }) => {
   if (!ctx.connectionId) return;
   const p = ctx.db.presence.connectionId.find(ctx.connectionId);
-  if (p) ctx.db.presence.connectionId.update({ ...p, cursorX: x, cursorY: y, hasCursor: visible, updatedAt: ctx.timestamp });
+  if (p && p.storyId) ctx.db.presence.connectionId.update({ ...p, cursorX: x, cursorY: y, hasCursor: visible, updatedAt: ctx.timestamp });
 });
 
+// O arrasto vai para a história aberta nesta aba (open_story já conferiu o acesso).
 export const send_drag = spacetimedb.reducer({ moves: t.string(), done: t.bool() }, (ctx, { moves, done }) => {
   if (!ctx.connectionId) return;
-  ctx.db.drags.insert({ connectionId: ctx.connectionId, identity: ctx.sender, moves, done });
+  const p = ctx.db.presence.connectionId.find(ctx.connectionId);
+  if (!p || !p.storyId || !hasRole(ctx.db, p.storyId, ctx.sender, 'editor')) return;
+  ctx.db.drags.insert({ storyId: p.storyId, connectionId: ctx.connectionId, identity: ctx.sender, moves, done });
 });
 
 // ---------- trava suave ----------
+// A história vem do alvo: scene:<id>:campo, choice:<id>:label ou story:<id>:title.
+function lockStoryId(ctx: Ctx, target: string): string {
+  const [kind, id, field] = target.split(':');
+  if (kind === 'story' && field === 'title') return id;
+  if (kind === 'scene' && TEXT_FIELDS.has(field)) return ctx.db.scene.id.find(id)?.storyId ?? '';
+  if (kind === 'choice' && field === 'label') return ctx.db.choice.id.find(id)?.storyId ?? '';
+  throw new SenderError('INVALID');
+}
+
 function takeLock(ctx: Ctx, target: string) {
   if (!ctx.connectionId) throw new SenderError('UNAUTHENTICATED');
+  const storyId = lockStoryId(ctx, target);
+  requireRole(ctx, storyId, 'editor');
   if (lockedByOther(ctx, target)) throw new SenderError('LOCKED');
   const row = {
-    target, connectionId: ctx.connectionId, identity: ctx.sender,
+    target, storyId, connectionId: ctx.connectionId, identity: ctx.sender,
     expiresAt: new Timestamp(ctx.timestamp.microsSinceUnixEpoch + LOCK_MICROS),
   };
   if (ctx.db.locks.target.find(target)) ctx.db.locks.target.update(row);
@@ -408,10 +732,11 @@ function jobFor(ctx: Ctx, id: string) {
 }
 
 export const request_ai = spacetimedb.reducer(
-  { id: t.string(), kind: t.string(), input: t.string() },
-  (ctx, { id, kind, input }) => {
+  { id: t.string(), storyId: t.string(), kind: t.string(), input: t.string() },
+  (ctx, { id, storyId, kind, input }) => {
     if (!AI_KINDS.has(kind)) throw new SenderError('INVALID');
     aiProvider(ctx.env);
+    requireRole(ctx, storyId, 'editor');
     const cur = ctx.db.aiJob.id.find(id);
     if (cur) {
       // Reenvio após queda de conexão: mesmo pedido, nada a fazer.
@@ -421,14 +746,14 @@ export const request_ai = spacetimedb.reducer(
     if (id.length > 64 || input.length > 200_000) throw new SenderError('INVALID');
     checkRate(ctx);
     ctx.db.aiJob.insert({
-      id, requester: ctx.sender, kind, input, status: 'pending', result: '', error: '',
+      id, requester: ctx.sender, storyId, kind, input, status: 'pending', result: '', error: '',
       createdAt: ctx.timestamp, updatedAt: ctx.timestamp,
     });
     if (kind === 'chat') {
       let text = '';
       try { text = String(JSON.parse(input).message ?? ''); } catch { throw new SenderError('INVALID'); }
       ctx.db.chatMessage.insert({
-        id: id + ':u', user: ctx.sender, jobId: id, role: 'user', content: text, proposals: '[]', createdAt: ctx.timestamp,
+        id: id + ':u', user: ctx.sender, storyId, jobId: id, role: 'user', content: text, proposals: '[]', createdAt: ctx.timestamp,
       });
     }
   }
@@ -469,7 +794,7 @@ export const complete_job = spacetimedb.reducer({ id: t.string(), result: t.stri
     let r: { content?: string; proposals?: unknown[] };
     try { r = JSON.parse(result); } catch { throw new SenderError('INVALID'); }
     ctx.db.chatMessage.insert({
-      id: id + ':a', user: j.requester, jobId: id, role: 'assistant', content: String(r.content ?? ''),
+      id: id + ':a', user: j.requester, storyId: j.storyId, jobId: id, role: 'assistant', content: String(r.content ?? ''),
       proposals: JSON.stringify(r.proposals ?? []), createdAt: ctx.timestamp,
     });
   }
@@ -482,15 +807,26 @@ export const fail_job = spacetimedb.reducer({ id: t.string(), error: t.string() 
   ctx.db.aiJob.id.update({ ...j, status: 'failed', error: error.slice(0, 200), updatedAt: ctx.timestamp });
 });
 
-// Cada pessoa vê só os próprios pedidos e conversas; o worker vê a fila inteira.
+// Cada pessoa vê só os próprios pedidos e a conversa da história aberta; o worker vê a fila inteira.
 export const my_ai_job = spacetimedb.view({ public: true }, t.array(aiJob.rowType), ctx => [
   ...ctx.db.aiJob.requester.filter(ctx.sender),
 ]);
-export const my_chat_message = spacetimedb.view({ public: true }, t.array(chatMessage.rowType), ctx => [
-  ...ctx.db.chatMessage.user.filter(ctx.sender),
-]);
+export const my_chat_message = spacetimedb.view({ public: true }, t.array(chatMessage.rowType), ctx => {
+  const id = curStoryId(ctx);
+  return id ? [...ctx.db.chatMessage.user.filter(ctx.sender)].filter(m => m.storyId === id) : [];
+});
 export const worker_queue = spacetimedb.view({ public: true }, t.array(aiJob.rowType), ctx =>
   isWorker(ctx as any) ? [...ctx.db.aiJob.status.filter('pending'), ...ctx.db.aiJob.status.filter('running')] : []
+);
+// O grafo para o contexto da IA. O worker filtra pela história do pedido (ai_job.storyId).
+export const worker_story = spacetimedb.view({ public: true }, t.array(story.rowType), ctx =>
+  isWorker(ctx as any) ? [...ctx.db.story.iter()] : []
+);
+export const worker_scene = spacetimedb.view({ public: true }, t.array(scene.rowType), ctx =>
+  isWorker(ctx as any) ? [...ctx.db.scene.iter()] : []
+);
+export const worker_choice = spacetimedb.view({ public: true }, t.array(choice.rowType), ctx =>
+  isWorker(ctx as any) ? [...ctx.db.choice.iter()] : []
 );
 
 // ---------- IA: procedures de texto ----------
@@ -599,8 +935,10 @@ export const suggest_scene = spacetimedb.procedure(
     rateFromProcedure(ctx);
     const { src, label } = ctx.withTx(tx => {
       const s = tx.db.scene.id.find(sourceSceneId);
+      // Quem não edita a história da cena recebe NOT_FOUND, como se ela não existisse.
+      if (!s || !hasRole(tx.db, s.storyId, ctx.sender, 'editor')) return { src: undefined, label: '' };
       const c = choiceId ? tx.db.choice.id.find(choiceId) : undefined;
-      return { src: s ? { title: s.title, text: s.text, bg: s.bg } : undefined, label: c ? c.label : '' };
+      return { src: { title: s.title, text: s.text, bg: s.bg }, label: c && c.sceneId === s.id ? c.label : '' };
     });
     if (!src) throw new SenderError('NOT_FOUND');
     if (provider !== 'mock') throw new SenderError('AI_DISABLED'); // provedores reais: integração pendente
@@ -616,8 +954,13 @@ export const suggest_scene = spacetimedb.procedure(
 export const complete_text = spacetimedb.procedure(
   { sceneId: t.string(), text: t.string(), textKind: t.string(), speakerName: t.string(), instruction: t.string() },
   t.string(),
-  (ctx, { text, textKind, speakerName, instruction }) => envelope(() => {
+  (ctx, { sceneId, text, textKind, speakerName, instruction }) => envelope(() => {
     const provider = aiProvider(ctx.env);
+    const ok = ctx.withTx(tx => {
+      const s = tx.db.scene.id.find(sceneId);
+      return !!s && hasRole(tx.db, s.storyId, ctx.sender, 'editor');
+    });
+    if (!ok) throw new SenderError('NOT_FOUND');
     rateFromProcedure(ctx);
     if (provider !== 'mock') throw new SenderError('AI_DISABLED');
     mockLatency(ctx);
@@ -637,10 +980,36 @@ export const init = spacetimedb.init(ctx => {
 
 export const ping = spacetimedb.reducer(_ctx => {});
 
+const PROFILE_COLORS = ['#f2a541', '#5eead4', '#a78bfa', '#f472b6', '#60a5fa', '#4ade80', '#fb7185', '#facc15'];
+
+// Conexões sem conta aceita (o worker, por exemplo) entram, mas nenhum reducer de usuário as atende.
 export const on_connect = spacetimedb.clientConnected(ctx => {
   if (!ctx.connectionId) return;
+  const claims = accountClaims(ctx);
+  let storyId = '';
+  if (claims) {
+    const cur = ctx.db.account.identity.find(ctx.sender);
+    // E-mail sem verificação não substitui um já confirmado.
+    const email = claims.email || cur?.email || '';
+    const row = {
+      identity: ctx.sender, email, name: claims.name || cur?.name || '', picture: claims.picture || cur?.picture || '',
+      createdAt: cur?.createdAt ?? ctx.timestamp, lastSeenAt: ctx.timestamp,
+    };
+    if (cur) ctx.db.account.identity.update(row);
+    else ctx.db.account.insert(row);
+    // Convites para este e-mail viram participação.
+    if (email) for (const v of [...ctx.db.storyInvite.email.filter(email)]) {
+      if (ctx.db.story.id.find(v.storyId)) addMember(ctx, v.storyId, ctx.sender, v.role);
+      ctx.db.storyInvite.id.delete(v.id);
+    }
+    if (!ctx.db.profile.identity.find(ctx.sender))
+      ctx.db.profile.insert({ identity: ctx.sender, name: (row.name.split(' ')[0] || 'Anônimo').slice(0, 40), color: PROFILE_COLORS[Math.floor(ctx.random() * PROFILE_COLORS.length)] });
+    // Reconexão: a presença volta para a história que estava aberta.
+    const o = ctx.db.activeStory.identity.find(ctx.sender);
+    if (o && memberOf(ctx.db, o.storyId, ctx.sender)) storyId = o.storyId;
+  }
   ctx.db.presence.insert({
-    connectionId: ctx.connectionId, identity: ctx.sender, cursorX: 0, cursorY: 0, hasCursor: false, updatedAt: ctx.timestamp,
+    connectionId: ctx.connectionId, identity: ctx.sender, storyId, cursorX: 0, cursorY: 0, hasCursor: false, updatedAt: ctx.timestamp,
   });
 });
 

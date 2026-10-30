@@ -13,6 +13,7 @@ import {
 export default __t.row({
   id: __t.string().primaryKey(),
   requester: __t.identity(),
+  storyId: __t.string().name("story_id"),
   kind: __t.string(),
   input: __t.string(),
   status: __t.string(),
