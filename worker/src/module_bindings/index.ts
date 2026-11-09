@@ -37,6 +37,7 @@ import {
 import ApplyOperationsReducer from "./apply_operations_reducer";
 import CancelInviteReducer from "./cancel_invite_reducer";
 import ClaimJobReducer from "./claim_job_reducer";
+import ClearChatReducer from "./clear_chat_reducer";
 import CloseStoryReducer from "./close_story_reducer";
 import CompleteJobReducer from "./complete_job_reducer";
 import CreateStoryReducer from "./create_story_reducer";
@@ -249,6 +250,7 @@ const reducersSchema = __reducers(
   __reducerSchema("apply_operations", ApplyOperationsReducer),
   __reducerSchema("cancel_invite", CancelInviteReducer),
   __reducerSchema("claim_job", ClaimJobReducer),
+  __reducerSchema("clear_chat", ClearChatReducer),
   __reducerSchema("close_story", CloseStoryReducer),
   __reducerSchema("complete_job", CompleteJobReducer),
   __reducerSchema("create_story", CreateStoryReducer),

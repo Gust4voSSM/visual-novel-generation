@@ -195,7 +195,8 @@ function startPinch(){const[a,b]=[...touches.values()];pinch={d:Math.hypot(a.x-b
 function doPinch(){const[a,b]=[...touches.values()];const d=Math.hypot(a.x-b.x,a.y-b.y)||1,mx=(a.x+b.x)/2,my=(a.y+b.y)/2,r=canvas.getBoundingClientRect(),v=pinch.v;
   const z=Math.max(.3,Math.min(2,v.z*d/pinch.d)),wx=(pinch.mx-r.left-v.x)/v.z,wy=(pinch.my-r.top-v.y)/v.z;view.z=z;view.x=mx-r.left-wx*z;view.y=my-r.top-wy*z;applyView();}
 function flyTo(x,y,z){const v0={...view},t0=performance.now();const step=t=>{const k=Math.min(1,(t-t0)/260),q=1-Math.pow(1-k,3);view.x=v0.x+(x-v0.x)*q;view.y=v0.y+(y-v0.y)*q;view.z=v0.z+(z-v0.z)*q;applyView();if(k<1)requestAnimationFrame(step);};requestAnimationFrame(step);}
-function focusScene(id){const s=scene(id);if(!s)return;const r=canvas.getBoundingClientRect();const z=Math.max(view.z,Math.min(1,(r.width-24)/300));const top=$('.hud').getBoundingClientRect().bottom-r.top+16;flyTo((r.width-300*z)/2-s.x*z,top-dispY(s)*z,z);}
+function focusScene(id){const s=scene(id);if(s)focusAt(s.x,dispY(s));}
+function focusAt(x,y){const r=canvas.getBoundingClientRect();const z=Math.max(view.z,Math.min(1,(r.width-24)/300));const top=$('.hud').getBoundingClientRect().bottom-r.top+16;flyTo((r.width-300*z)/2-x*z,top-y*z,z);}
 const geom=new Map;           // key -> {a,b}
 function ago(t0){return Math.round(performance.now()-t0);}
 
@@ -283,6 +284,7 @@ function drawWires(now){let h='';geom.clear();const es=edges();const live=new Se
   for(const g of ghosts){const p=Math.min(1,(now-g.t0)/480),k=p<.5?4*p*p*p:1-Math.pow(-2*p+2,3)/2;let d1='',d2='';
     if(g.kind==='cut'){d1=poly(g.a,g.b,0,g.t*(1-k));d2=poly(g.a,g.b,g.t+(1-g.t)*k,1);}else if(g.kind==='start')d1=poly(g.a,g.b,0,1-k);else d1=poly(g.a,g.b,k,1);
     const sw=(2.5*(1-.5*k)).toFixed(2),o=(.9*(1-.7*k*k)).toFixed(2);if(d1)h+=`<path class="wpath" d="${d1}" style="stroke:${g.col};stroke-width:${sw}px;opacity:${o}"/>`;if(d2)h+=`<path class="wpath" d="${d2}" style="stroke:${g.col};stroke-width:${sw}px;opacity:${o}"/>`;}
+  h+=draftWires();
   wiresEl.innerHTML=h;
   // landed glow
   nodesEl.querySelectorAll('.node.landed,.node.landed-plain').forEach(n=>{const t=[...tweens.values()].find(x=>x.to===n.dataset.id&&!x.noland&&now-x.t0>280);if(!t)n.classList.remove('landed','landed-plain');});
@@ -319,7 +321,7 @@ function nodeShake(id){const el=nodeEl(id);if(el){el.classList.remove('err');voi
 
 /* ---------- create / connect / cut ---------- */
 function blankScene(x,y){return{id:uid('s'),title:'Nova cena',x:Math.round(x),y:Math.round(y),bg:null,chars:[],kind:'narration',speaker:null,text:'',choices:[],next:null};}
-function freeSpot(sp){let x=sp.x+120,y=sp.y-20;const clash=(cx,cy)=>state.scenes.some(n=>cx<n.x+330&&cx+330>n.x&&cy<dispY(n)+nodeH(n.id)+30&&cy+480>dispY(n));for(let i=0;i<40;i++){if(!clash(x,y))break;y+=90;if(i%8===7){x+=340;y=sp.y-20;}}return{x,y};}
+function freeSpot(sp,k=1){let x=sp.x+120,y=sp.y-20;const clash=(cx,cy)=>state.scenes.some(n=>cx<n.x+330&&cx+340*(k-1)+330>n.x&&cy<dispY(n)+nodeH(n.id)+30&&cy+480>dispY(n));for(let i=0;i<40;i++){if(!clash(x,y))break;y+=90;if(i%8===7){x+=340;y=sp.y-20;}}return{x,y};}
 function createScene(src,ch,at,ai,opts={}){const sp=outPos(src.id,ch)||{x:src.x+300,y:src.y+200};const click=!at;const p=at||freeSpot(sp);
   if(!opts.skipUndo)pushUndo();const ns=blankScene(p.x,click?p.y:p.y-20);state.scenes.push(ns);const prevT=targetOf(src,ch);setTarget(src,ch,ns.id);const key=edgeKey(src.id,ch);
   fresh.set(ns.id,{t0:performance.now(),cls:ai?'pop-ai':'pop'});
@@ -660,39 +662,73 @@ function addMsg(html,who){const d=document.createElement('div');d.className='msg
 const CHAT_HELLO='Conheço o grafo, o elenco e os backgrounds desta história. Peça algo como <b>“crie a cena da ação sem destino”</b> ou <b>“continue a partir do final”</b>. Toda mudança chega como proposta para você aceitar.';
 addMsg(CHAT_HELLO,'bot');
 const chatJobs=new Map;const chatSeen=new Set; // jobId -> {el, next, held, text, done}
+let chatLive=false; // depois do histórico: propostas novas abrem o rascunho sozinhas
+const chatDropped=new Set; // pedidos em andamento quando o chat foi limpo: pedaços e falhas são ignorados
 function chatJob(jobId){let j=chatJobs.get(jobId);if(!j){j={el:addMsg('<span class="typingdots"><i></i><i></i><i></i></span>','bot'),next:0,held:new Map,text:'',done:false};chatJobs.set(jobId,j);}return j;}
-function onChatChunk(row){const j=chatJob(row.jobId);if(j.done)return;j.held.set(row.seq,row.text);
+function onChatChunk(row){if(chatDropped.has(row.jobId))return;const j=chatJob(row.jobId);if(j.done)return;j.held.set(row.seq,row.text);
   while(j.held.has(j.next)){j.text+=j.held.get(j.next);j.held.delete(j.next);j.next++;}
   if(j.text){j.el.innerHTML=esc(j.text)+'<span class="caret"></span>';log.scrollTop=log.scrollHeight;}}
-function chatJobChanged(row){if(row.status!=='failed')return;const j=chatJob(row.id);if(j.done)return;j.done=true;j.el.innerHTML=(j.text?esc(j.text)+'<br>':'')+`<span style="color:#ffb4a8">A IA falhou: ${esc(aiMessage(row.error))}</span>`;}
+function chatJobChanged(row){if(row.status!=='failed'||chatDropped.has(row.id))return;const j=chatJob(row.id);if(j.done)return;j.done=true;j.el.innerHTML=(j.text?esc(j.text)+'<br>':'')+`<span style="color:#ffb4a8">A IA falhou: ${esc(aiMessage(row.error))}</span>`;}
 function renderChatRow(row){if(chatSeen.has(row.id))return;chatSeen.add(row.id);
   if(row.role==='user'){addMsg(esc(row.content),'me');const job=conn.db.myAiJob.id.find(row.jobId);if(job&&(job.status==='pending'||job.status==='running'))chatJob(row.jobId);else if(job)chatJobChanged(job);return;}
   const j=chatJob(row.jobId);j.done=true;j.el.innerHTML=esc(row.content);
-  let props=[];try{props=JSON.parse(row.proposals);}catch(_){}props.forEach(p=>log.appendChild(proposalCard(p)));log.scrollTop=log.scrollHeight;}
+  let props=[];try{props=JSON.parse(row.proposals);}catch(_){}const cards=props.map(p=>log.appendChild(proposalCard(p)));log.scrollTop=log.scrollHeight;
+  const i=chatLive?cards.findIndex(c=>!c.classList.contains('done')):-1;if(i>=0)showDraft(props[i],cards[i]);}
+/* Rascunho da proposta: as cenas novas aparecem tracejadas no canvas, onde vão cair, sem entrar no grafo. */
+const draftsEl=$('#drafts');let draft=null; // {p, card, plan}
+// Saída de onde a proposta parte e as cenas novas com posição: lado a lado, num espaço livre.
+function proposalPlan(p){const ns=p.ops.filter(o=>o.op==='upsert_scene'&&!scene(o.scene.id)).map(o=>o.scene);if(!ns.length)return null;
+  const link=p.ops.find(o=>o.op==='upsert_choice'&&o.choice.target===ns[0].id);if(!link)return null;
+  const made=p.ops.find(o=>o.op==='upsert_choice'&&o.choice.id===link.choice.id&&o.choice.sceneId);
+  // Ação nova numa cena final: o fio sai da saída única dela.
+  const sid=made?made.choice.sceneId:state.scenes.find(s=>s.choices.some(c=>c.id===link.choice.id))?.id,ch=made?'':link.choice.id;
+  const src=sid&&scene(sid);if(!src)return null;
+  const at=freeSpot(outPos(sid,ch)||{x:src.x+300,y:src.y+200},ns.length);
+  return{sid,ch,scenes:ns.map((s,i)=>({...s,x:Math.round(at.x+340*i),y:Math.round(at.y)}))};}
+function draftHTML(s,i,n){let chars=[];try{chars=JSON.parse(s.chars||'[]');}catch(_){}
+  const spk=s.kind==='dialogue'?charById(s.speaker):null;
+  const sum=s.text?`${spk?`<span class="who" style="color:${spk.color||'var(--text)'}">${esc(spk.name)}</span>`:''}<span class="${spk?'':'narr'}">${esc(s.text)}</span>`:'<span class="none">sem texto</span>';
+  return`<div class="node dnode" style="left:${s.x}px;top:${s.y}px;animation-delay:${i*90}ms"><div class="nhead"><span class="port in"></span><span class="dtitle">${esc(s.title)}</span><span class="tag ai">${SPARK}rascunho</span>${i<n-1?'<span class="port out"></span>':''}</div><div class="mid"><div class="sec">${stageMini({...s,chars})}<div class="sum">${sum}</div></div></div></div>`;}
+function draftWires(){if(!draft)return'';const ins=[...draftsEl.querySelectorAll('.port.in')].map(centerOf),outs=[...draftsEl.querySelectorAll('.port.out')].map(centerOf);
+  const pairs=[[outPos(draft.plan.sid,draft.plan.ch),ins[0]],...outs.map((a,i)=>[a,ins[i+1]])];
+  return pairs.filter(([a,b])=>a&&b).map(([a,b])=>`<path class="wpath" d="${curve(a,b)}" style="stroke:#a78bfa;stroke-width:2.5px;stroke-dasharray:8 6;opacity:.85"/>`).join('');}
+function draftBtn(card,on){card.classList.toggle('previewing',on);const b=card.querySelector('[data-draft]');if(b)b.textContent=on?'Ocultar do canvas':'Ver no canvas';}
+function clearDraft(){if(!draft)return;draftBtn(draft.card,false);draft=null;draftsEl.innerHTML='';dirty=true;}
+function showDraft(p,card){clearDraft();const plan=proposalPlan(p);if(!plan){toast('A proposta não vale mais: a saída de origem mudou.','err');return;}
+  draft={p,card,plan};draftBtn(card,true);draftsEl.innerHTML=plan.scenes.map((s,i)=>draftHTML(s,i,plan.scenes.length)).join('');dirty=true;
+  focusAt(plan.scenes[0].x,plan.scenes[0].y);}
 function proposalCard(p){const card=document.createElement('div');card.className='proposal';
   const newScene=p.ops.find(o=>o.op==='upsert_scene')?.scene.id;const done=newScene&&scene(newScene);
-  card.innerHTML=`<h3>${SPARK}proposta · 1 passo de desfazer</h3><ul>${p.summary.map(t=>`<li>${esc(t)}</li>`).join('')}</ul><div class="row">${done?'<span class="hint">Aceita</span>':'<button class="btn sm violet solid" data-ok>Aceitar</button><button class="btn sm" data-no>Recusar</button>'}</div>`;
+  card.innerHTML=`<h3>${SPARK}proposta · 1 passo de desfazer</h3><ul>${p.summary.map(t=>`<li>${esc(t)}</li>`).join('')}</ul><div class="row">${done?'<span class="hint">Aceita</span>':'<button class="btn sm violet solid" data-ok>Aceitar</button><button class="btn sm" data-no>Recusar</button><button class="btn sm" data-draft>Ver no canvas</button>'}</div>`;
   if(done)card.classList.add('done');
   card.querySelector('[data-ok]')?.addEventListener('click',()=>{if(acceptProposal(p)){card.classList.add('done');card.querySelector('.row').innerHTML='<span class="hint">Aceita · Ctrl+Z desfaz tudo de uma vez</span>';}});
-  card.querySelector('[data-no]')?.addEventListener('click',()=>{card.classList.add('done');card.querySelector('.row').innerHTML='<span class="hint">Recusada</span>';});
+  card.querySelector('[data-draft]')?.addEventListener('click',()=>{if(draft&&draft.card===card)clearDraft();else showDraft(p,card);});
+  card.querySelector('[data-no]')?.addEventListener('click',()=>{if(draft&&draft.card===card)clearDraft();card.classList.add('done');card.querySelector('.row').innerHTML='<span class="hint">Recusada</span>';});
   return card;}
 // Aceitar valida contra o estado atual, que pode ter mudado desde a proposta.
 function acceptProposal(p){const f=flatOf(state);const ops=JSON.parse(JSON.stringify(p.ops));
+  // As cenas caem onde o rascunho mostrou; sem rascunho na tela, o lugar é calculado agora.
+  const plan=draft&&draft.p===p?draft.plan:proposalPlan(p);if(draft&&draft.p===p)clearDraft();
   // Confere em ordem, como o reducer: uma operação pode usar a ação criada pela anterior.
-  const work=cloneFlat(f);let src=null;
+  const work=cloneFlat(f);
   for(const o of ops){if(o.op==='upsert_choice'){const c=o.choice;const sid=c.sceneId??work.choices.get(c.id)?.sceneId;
       if(!sid||!work.scenes.has(sid)){toast('A proposta não vale mais: a cena de origem foi apagada.','err');return false;}
-      const cur=f.choices.get(c.id);if(cur&&cur.target&&c.target&&cur.target!==c.target&&f.scenes.has(cur.target)){toast('A proposta não vale mais: essa ação já foi ligada a outra cena.','err');return false;}
-      if(c.target)src=scene(sid);}
+      const cur=f.choices.get(c.id);if(cur&&cur.target&&c.target&&cur.target!==c.target&&f.scenes.has(cur.target)){toast('A proposta não vale mais: essa ação já foi ligada a outra cena.','err');return false;}}
     applyOps(work,[o]);}
   const sop=ops.find(o=>o.op==='upsert_scene'&&!f.scenes.has(o.scene.id));
-  if(sop&&src){const p2=freeSpot({x:src.x+300,y:src.y+200});sop.scene.x=p2.x;sop.scene.y=p2.y;}
+  for(const o of ops){const d=o.op==='upsert_scene'&&plan?.scenes.find(x=>x.id===o.scene.id);if(d){o.scene.x=d.x;o.scene.y=d.y;}}
   pushUndo();applyOps(f,ops);writeFlat(f);
   if(sop){const ns=scene(sop.scene.id);if(ns){ns.ai=true;fresh.set(ns.id,{t0:performance.now(),cls:'pop-ai'});reveal.set(ns.id,performance.now());setTimeout(()=>reveal.delete(ns.id),1700);setTimeout(()=>{const t=scene(ns.id);if(t){t.ai=false;refresh();}},2600);}}
   refresh();if(sop){ensureVisible(sop.scene.id);const n=scene(sop.scene.id);if(n)burst(n.x,n.y+20,'ai');shake();}return true;}
 $('#chatForm').onsubmit=e=>{e.preventDefault();const t=$('#chatInput').value.trim();if(!t)return;if(!connected){toast('Sem conexão com o servidor.','err');return;}
   const btn=$('#chatForm button[type=submit]');btn.disabled=true;
   requestAi('chat',{message:t,context:aiContext()}).then(()=>{$('#chatInput').value='';},err=>toast('A IA não recebeu o pedido: '+aiMessage(err),'err')).finally(()=>{btn.disabled=false;});};
+$('#chatClear').onclick=()=>{if(!connected){toast('Sem conexão com o servidor.','err');return;}
+  if(!confirm('Limpar a conversa com o assistente? As propostas ainda não aceitas somem.'))return;
+  conn.reducers.clearChat({}).then(()=>{
+    for(const j of conn.db.myAiJob.iter())if(j.kind==='chat'&&(j.status==='pending'||j.status==='running'))chatDropped.add(j.id);
+    clearDraft();resetChat();
+  },err=>toast('Não foi possível limpar o chat: '+aiMessage(err),'err'));};
 $('#chatInput').addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();$('#chatForm').requestSubmit();}});
 
 /* ---------- play mode ---------- */
@@ -943,14 +979,14 @@ $('#btnLogout').onclick=()=>logout();
 
 function updateRole(){myRole=storyId?roleIn(storyId):'';const ro=myRole==='viewer';
   appEl.classList.toggle('ro',ro);$('#storyTitle').readOnly=ro;$('#btnMore').hidden=myRole!=='owner';}
-function resetChat(){log.innerHTML='';chatJobs.clear();chatSeen.clear();addMsg(CHAT_HELLO,'bot');}
+function resetChat(){clearDraft();log.innerHTML='';chatJobs.clear();chatSeen.clear();addMsg(CHAT_HELLO,'bot');}
 // Esquece o grafo, o desfazer e a conversa da história anterior.
 function leaveStory(close=true){if(!storyId)return;releaseLock();
   if(close&&connected)conn.reducers.closeStory({}).catch(()=>{});
   if(dragSub){try{dragSub.unsubscribe();}catch(_){}dragSub=null;}
   storyId='';myRole='';ready=false;base=null;inflight.length=0;retryOps=[];expanded=null;
   undoS.length=0;redoS.length=0;gens.clear();lit.clear();remoteDrag.clear();for(const c of cursors.values())c.el.remove();cursors.clear();
-  state.scenes=[];state.title='';state.start='';closeModal();closeHudPop();resetChat();renderAll();}
+  chatLive=false;state.scenes=[];state.title='';state.start='';closeModal();closeHudPop();resetChat();renderAll();}
 function showHome(){leaveStory();$('#gate').hidden=true;$('#home').hidden=false;document.title='Roteiro VN';renderHome();}
 async function enterStory(id){$('#gate').hidden=true;$('#home').hidden=true;if(storyId===id)return;leaveStory(false);storyId=id;
   try{await conn.reducers.openStory({storyId:id});await until(()=>storyId!==id||viewsMine());}
@@ -1022,7 +1058,7 @@ async function logout(){if(DEV_ANON)sessionStorage.removeItem(TOKEN_KEY);else aw
 
 function onReady(){ready=true;base=null;rebuild();renderPeople();syncCursors();requestAnimationFrame(fitView);
   // Conversa salva no servidor: volta ao recarregar a aba (mesma conta, mesma história).
-  [...conn.db.myChatMessage.iter()].sort((a,b)=>Number(a.createdAt.microsSinceUnixEpoch-b.createdAt.microsSinceUnixEpoch)||(a.role==='user'?-1:1)).forEach(renderChatRow);}
+  [...conn.db.myChatMessage.iter()].sort((a,b)=>Number(a.createdAt.microsSinceUnixEpoch-b.createdAt.microsSinceUnixEpoch)||(a.role==='user'?-1:1)).forEach(renderChatRow);chatLive=true;}
 function connect(){
   const b=DbConnection.builder().withUri(STDB_URI).withDatabaseName(STDB_DB).withAutomaticReconnect();
   if(DEV_ANON)b.withToken(sessionStorage.getItem(TOKEN_KEY)||undefined);else b.withToken(idToken).withTokenProvider(freshToken);
