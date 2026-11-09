@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="pt-BR">
+<html lang="pt-BR" class="boot">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
@@ -70,6 +70,8 @@ button{cursor:pointer}
 .btn.violet:hover{border-color:var(--violet-hi);background:rgba(76,58,140,.3);box-shadow:0 0 14px rgba(167,139,250,.35);color:#f1eaff}
 .btn.violet.solid{background:var(--violet);border-color:var(--violet);color:#160f2c;font-weight:600}
 .btn.danger:hover{border-color:var(--red);color:#ff8a8a}
+.btn.danger.solid{background:var(--red);border-color:var(--red);color:#2b0b0e;font-weight:600}
+.btn.danger.solid:hover{background:#ff8585;border-color:#ff8585;color:#2b0b0e}
 .btn.sm{height:28px;padding:0 10px;font-size:12.5px;border-radius:6px}
 .inp{height:30px;background:var(--well);border:1px solid var(--line);border-radius:6px;color:var(--text);font-size:13px;padding:0 8px;width:100%;min-width:0;outline:none}
 .inp:focus{border-color:var(--amber)}
@@ -280,22 +282,53 @@ select.inp{padding:0 6px}
 .cutbtn:hover,.cutbtn:focus-visible{opacity:1;background:var(--red-bg);color:#ff8a8a;border-color:var(--red);transform:scale(1.15)}
 .marquee{position:absolute;pointer-events:none;border:1px solid var(--blue);background:rgba(108,182,255,.1);border-radius:3px}
 /* HUD */
-.hud{position:absolute;left:16px;top:16px;right:16px;display:flex;flex-wrap:wrap;gap:8px 10px;align-items:center;pointer-events:none;z-index:6}
-.hud>*{pointer-events:auto}
+.hud{position:absolute;left:16px;top:16px;right:16px;display:flex;gap:10px;align-items:center;pointer-events:none;z-index:6}
+.hz{display:flex;align-items:center;gap:8px;min-width:0}
+.hz>*{pointer-events:auto}
+.hz-left{flex:1 1 0}
+.hz-mid{flex:none;justify-content:center}
+.hz-right{flex:1 1 0;justify-content:flex-end}
+/* título + ⋯ + status de salvamento, num só bloco */
+.titlebox{display:flex;align-items:center;gap:2px;min-width:0;height:36px;padding:0 4px 0 10px;background:rgba(28,29,33,.92);box-shadow:inset 0 0 0 1px var(--line);border-radius:8px}
+.titlebox .title-in{width:auto;min-width:80px;max-width:300px;field-sizing:content;margin:0;height:28px;padding:0 6px;text-overflow:ellipsis}
+.titlebox .iconbtn{flex:none}
+.sync{display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 8px;border:0;border-radius:6px;background:transparent;color:var(--muted);font-size:12px;white-space:nowrap;flex:none}
+.sync:hover{background:var(--line);color:var(--text-2)}
+.sync .ndot{width:7px;height:7px}
+.sync.on .ndot{background:#4ade80}
+.sync.saving .ndot{background:var(--amber);animation:lockpulse 1s ease-in-out infinite}
+.sync.off .ndot,.sync.err .ndot{background:var(--red)}
+.sync.off,.sync.err{color:#ffb4b4}
+.chip.share svg{width:15px;height:15px}
+/* popovers do topo (⋯ e atalhos): posicionados pelo JS logo abaixo do botão */
+.hudpop{position:absolute;z-index:9}
+.hudpop .menu{position:static;animation:pop .18s ease-out}
+.helppop{width:320px;max-width:calc(100vw - 32px);background:var(--surface);border-radius:10px;box-shadow:inset 0 0 0 1px var(--line),0 16px 40px rgba(0,0,0,.5);padding:12px 14px;animation:pop .18s ease-out}
+.helppop h3{margin:0 0 8px;font-size:13px;font-weight:600}
+.helppop dl{margin:0;display:grid;grid-template-columns:auto 1fr;gap:8px 12px;align-items:baseline;font-size:12.5px;color:var(--text-2)}
+.helppop dt{white-space:nowrap}
+.helppop dd{margin:0}
+/* telas estreitas: some primeiro o resumo do grafo, depois os avatares e os rótulos */
+@container (max-width:1100px){.hz-mid{display:none}}
+@container (max-width:860px){.people,.sync .slabel{display:none}.chip.share span{display:none}.chip.share{padding:8px 10px}}
+@container (max-width:560px){#btnHelp{display:none}.titlebox .title-in{min-width:40px}}
 .playbtn{height:36px;padding:0 14px;border-radius:8px;border:0;background:var(--amber);color:#1a1308;font-weight:600;font-size:13px;display:inline-flex;align-items:center;gap:8px}
 .playbtn:hover{background:var(--amber-hi)}
 .playbtn svg{width:13px;height:13px}
-.stats{margin-left:auto;font-family:var(--mono);font-size:12px}
+.stats{font-family:var(--mono);font-size:12px;color:var(--muted);white-space:nowrap}
 .stats .warnlink{border:0;background:none;color:#ffc98a;font:inherit;padding:0;text-decoration:underline dotted;text-underline-offset:3px}
 .zoombar{position:absolute;left:16px;bottom:16px;display:flex;align-items:center;gap:2px;background:rgba(28,29,33,.92);box-shadow:inset 0 0 0 1px var(--line);border-radius:8px;padding:4px;z-index:6}
 .zbtn{height:32px;min-width:32px;padding:0 8px;border:0;border-radius:6px;background:transparent;color:var(--text-2);font-family:var(--mono);font-size:13px;display:inline-flex;align-items:center;justify-content:center}
 .zbtn:hover{background:var(--line);color:var(--text)}
 .zbtn.pct{min-width:56px;font-size:12px}
+.zbtn.center{gap:6px;font-family:var(--sans);font-size:12.5px;padding:0 10px}
+.zbtn.center svg{width:15px;height:15px}
+@container (max-width:560px){.zbtn.center span{display:none}}
 .zbtn:disabled{opacity:.35;cursor:default;background:transparent}
 .zsep{width:1px;height:18px;background:var(--line-3);margin:0 4px}
 .selbar{position:absolute;left:50%;bottom:16px;transform:translateX(-50%);display:flex;align-items:center;gap:8px;background:rgba(28,29,33,.96);box-shadow:inset 0 0 0 1px var(--line),0 12px 32px rgba(0,0,0,.45);border-radius:10px;padding:6px 8px 6px 14px;font-size:13px;color:var(--text-2);white-space:nowrap;z-index:6;animation:pop .25s cubic-bezier(.2,1.3,.4,1)}
 .selbar .btn:hover{border-color:var(--blue);color:#cfe7ff}
-.warnpop{position:absolute;right:16px;top:64px;z-index:8;width:340px;max-width:calc(100% - 32px);background:var(--surface);border-radius:10px;box-shadow:inset 0 0 0 1px var(--line),0 16px 40px rgba(0,0,0,.5);padding:12px 14px;animation:pop .2s ease-out}
+.warnpop{position:absolute;left:0;right:0;margin:0 auto;top:64px;z-index:8;width:340px;max-width:calc(100% - 32px);background:var(--surface);border-radius:10px;box-shadow:inset 0 0 0 1px var(--line),0 16px 40px rgba(0,0,0,.5);padding:12px 14px;animation:pop .2s ease-out}
 .warnpop h3{margin:0 0 2px;font-size:13px;font-weight:600}
 .warnpop ul{margin:8px 0 0;padding:0;list-style:none;display:flex;flex-direction:column;gap:6px}
 .warnpop li{font-size:12.5px;color:var(--text-2);line-height:1.45;display:flex;gap:8px}
@@ -415,6 +448,45 @@ select.inp{padding:0 6px}
   .play .pcont{position:static;display:flex;justify-content:flex-end}
 }
 @media (prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important}}
+/* ---------- contas e histórias ---------- */
+.screen{position:fixed;inset:0;z-index:40;background:var(--ink);overflow:auto}
+.screen.center{display:grid;place-items:center;padding:16px}
+#gate{z-index:41} /* acima da lista: também é o aviso de sessão expirada */
+.screen[hidden]{display:none!important}
+.gate-card{background:var(--surface);border-radius:14px;box-shadow:inset 0 0 0 1px var(--line);padding:28px;width:min(380px,100%);display:flex;flex-direction:column;gap:14px;align-items:flex-start}
+.gate-card p{margin:0;color:var(--text-2);line-height:1.5}
+.gate-card .hint:empty{display:none}
+/* Botão no padrão do Google para tema escuro: fundo #131314, borda #8e918f, logo colorido. */
+.gbtn{height:40px;padding:0 14px 0 12px;border-radius:20px;background:#131314;border-color:#8e918f;color:#e3e3e3;font-weight:500;gap:10px;text-decoration:none}
+.gbtn:hover{border-color:#e3e3e3;color:#fff}
+.gbtn svg{width:18px;height:18px}
+.home-head{display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid var(--line-2)}
+.who{display:flex;align-items:center;gap:8px;color:var(--text-2);min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.who img{width:24px;height:24px;border-radius:50%;flex:none}
+.home-body{max-width:860px;margin:0 auto;padding:24px 16px}
+.home-top{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:16px}
+.home-top h1{margin:0;font-size:18px;font-weight:600}
+.stories{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px}
+.story{display:flex;align-items:center;gap:8px;background:var(--surface);border-radius:10px;box-shadow:inset 0 0 0 1px var(--line);padding:6px 10px 6px 6px;transition:box-shadow .12s}
+.story:hover{box-shadow:inset 0 0 0 1px var(--amber)}
+.sopen{flex:1;min-width:0;border:0;background:transparent;text-align:left;padding:8px;border-radius:7px;display:flex;flex-direction:column;gap:3px}
+.sopen h3{margin:0;font-size:14px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.meta{color:var(--muted);font-size:12px}
+.empty{color:var(--muted);padding:32px 0;text-align:center}
+.people-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px}
+.people-list li{display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--line-2)}
+.pinfo{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.pinfo b{font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.share-role{width:auto}
+.app.ro #btnAddScene,.app.ro #chatForm{display:none}
+/* askText/askConfirm: o form envolve cabeçalho, corpo e rodapé sem quebrar o flex do .modal */
+.askform{display:contents}
+.modal.ask{width:min(420px,100%)}
+.ask-text{margin:0;color:var(--text-2);line-height:1.55}
+.ask-text b{color:var(--text);font-weight:600}
+/* O editor está no HTML, então o navegador o pintaria (com os dois painéis abertos) antes do
+   script decidir a rota e o estado salvo dos painéis. Só aparece quando uma história abre. */
+.boot .app{visibility:hidden}
 </style>
 <link rel="stylesheet" href="/src/live.css">
 </head>
@@ -424,7 +496,6 @@ select.inp{padding:0 6px}
   <aside class="rail" id="rail" aria-label="Elenco e cenários">
     <div class="rail-top">
       <div class="brand"><strong>Roteiro</strong><span>visual novel</span><button class="iconbtn" id="railClose" aria-label="Recolher painel do elenco" title="Recolher painel" style="margin-left:auto"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2.5"/><path d="M9 4v16"/><path class="chev0" d="M15 10l-2 2 2 2"/></svg></button></div>
-      <input class="title-in" id="storyTitle" aria-label="Título da história">
       <div class="tabs" role="tablist"><button class="tab" role="tab" id="tabChars">Personagens <span class="n" id="nChars"></span></button><button class="tab" role="tab" id="tabBgs">Backgrounds <span class="n" id="nBgs"></span></button></div>
     </div>
     <div class="rail-actions" id="railActions"></div>
@@ -443,20 +514,34 @@ select.inp{padding:0 6px}
       </div>
     </div>
     <div class="wash" id="wash"></div>
+    <!-- Topo em três zonas: onde estou (título, salvamento) · o grafo · pessoas e ações. -->
     <div class="hud">
-      <button class="chip ptoggle" id="tglRail" aria-controls="rail" aria-expanded="true" title="Mostrar/ocultar elenco"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2.5"/><path d="M9 4v16"/><path class="chev" d="M15 10l-2 2 2 2"/></svg></button>
-      <button class="playbtn" id="btnPlay"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7 4l13 8-13 8z"/></svg>Jogar</button>
-      <div class="chip hide-lg"><span class="dotport"></span>Clique ou arraste uma saída para criar uma cena</div>
-      <div class="chip hide-sm"><span class="kbd">Shift</span>+ clicar ou arrastar: a IA monta a cena</div>
-      <div class="chip hide-mid"><span class="kbd">Alt</span>+ arrastar: cortar fios</div>
-      <div class="chip stats" id="stats"></div>
-      <button class="chip ptoggle" id="tglChat" aria-controls="chat" aria-expanded="true" title="Mostrar/ocultar assistente"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2.5"/><path d="M15 4v16"/><path class="chev" d="M9 10l2 2-2 2"/></svg></button>
+      <div class="hz hz-left">
+        <button class="chip ptoggle" id="tglRail" aria-controls="rail" aria-expanded="true" title="Mostrar/ocultar elenco"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2.5"/><path d="M9 4v16"/><path class="chev" d="M15 10l-2 2 2 2"/></svg></button>
+        <button class="chip ptoggle" id="btnHome" title="Voltar para suas histórias" aria-label="Voltar para suas histórias"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 6l-6 6 6 6"/></svg></button>
+        <div class="titlebox">
+          <input class="title-in" id="storyTitle" aria-label="Título da história" placeholder="Sem título">
+          <button class="iconbtn" id="btnMore" title="Mais opções" aria-label="Mais opções" aria-haspopup="menu" data-pop><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg></button>
+          <button class="sync" id="net" aria-live="polite"><span class="ndot"></span><span class="slabel">conectando…</span></button>
+        </div>
+      </div>
+      <div class="hz hz-mid"><span class="stats" id="stats"></span></div>
+      <div class="hz hz-right">
+        <div class="people" id="people"></div>
+        <button class="chip share" id="btnShare" title="Pessoas com acesso a esta história"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.6-3.6 3.2-6 6.5-6s5.9 2.4 6.5 6"/><path d="M19 8v6M16 11h6"/></svg><span>Compartilhar</span></button>
+        <button class="playbtn" id="btnPlay"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7 4l13 8-13 8z"/></svg>Jogar</button>
+        <button class="chip ptoggle" id="btnHelp" title="Atalhos" aria-label="Atalhos" aria-haspopup="dialog" data-pop><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9.6 9.3a2.5 2.5 0 014.8.9c0 1.7-2.4 2.2-2.4 3.6"/><path d="M12 17.2h.01"/></svg></button>
+        <button class="chip ptoggle" id="tglChat" aria-controls="chat" aria-expanded="true" title="Mostrar/ocultar assistente"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2.5"/><path d="M15 4v16"/><path class="chev" d="M9 10l2 2-2 2"/></svg></button>
+      </div>
     </div>
+    <div class="hudpop" id="hudPop" hidden></div>
     <div class="zoombar">
       <button class="zbtn" id="btnUndo" aria-label="Desfazer (Ctrl+Z)" title="Desfazer (Ctrl+Z)"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14L4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 010 11H11"/></svg></button>
       <button class="zbtn" id="btnRedo" aria-label="Refazer (Ctrl+Shift+Z)" title="Refazer (Ctrl+Shift+Z)"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 14l5-5-5-5"/><path d="M20 9H9.5a5.5 5.5 0 000 11H13"/></svg></button>
       <span class="zsep"></span>
       <button class="zbtn" id="btnAddScene" title="Nova cena solta">+ cena</button>
+      <span class="zsep"></span>
+      <button class="zbtn center" id="btnCenter" title="Enquadrar a história inteira na tela"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 9V5a1 1 0 011-1h4M15 4h4a1 1 0 011 1v4M20 15v4a1 1 0 01-1 1h-4M9 20H5a1 1 0 01-1-1v-4"/><circle cx="12" cy="12" r="2.5"/></svg><span>Centralizar</span></button>
       <span class="zsep"></span>
       <button class="zbtn" id="btnZoomOut" aria-label="Diminuir zoom">−</button>
       <button class="zbtn pct" id="btnZoomReset" aria-label="Enquadrar tudo" title="Enquadrar tudo">100%</button>
@@ -471,6 +556,31 @@ select.inp{padding:0 6px}
     <div class="chat-log" id="chatLog"></div>
     <form class="chat-form" id="chatForm"><textarea id="chatInput" placeholder="Peça uma mudança na história…" aria-label="Mensagem para a IA"></textarea><button class="btn violet solid" type="submit">Enviar</button></form>
   </aside>
+</div>
+<div class="screen center" id="gate" hidden>
+  <div class="gate-card">
+    <div class="brand"><strong>Roteiro</strong><span>visual novel</span></div>
+    <p>Entre com sua conta Google para ver e editar suas histórias.</p>
+    <a class="btn gbtn" id="gateBtn" href="/api/auth/start"><svg viewBox="0 0 48 48" aria-hidden="true"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg>Entrar com Google</a>
+    <p class="hint" id="gateMsg" role="status"></p>
+  </div>
+</div>
+<div class="screen" id="home" hidden>
+  <header class="home-head">
+    <div class="brand"><strong>Roteiro</strong><span>visual novel</span></div>
+    <span style="flex:1"></span>
+    <span class="who" id="who"></span>
+    <button class="btn sm" id="btnLogout">Sair</button>
+  </header>
+  <main class="home-body">
+    <div class="home-top">
+      <h1>Suas histórias</h1>
+      <span style="flex:1"></span>
+      <button class="btn" id="btnNewExample">Começar pelo exemplo</button>
+      <button class="btn primary" id="btnNew">+ Nova história</button>
+    </div>
+    <ul class="stories" id="stories"><li class="empty">Carregando…</li></ul>
+  </main>
 </div>
 <div class="toasts" id="toasts" aria-live="polite"></div>
 

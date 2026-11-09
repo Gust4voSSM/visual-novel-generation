@@ -24,7 +24,86 @@ spacetime publish -s local -p server -y roteiro-spike
 npm --prefix client run dev
 ```
 
-Abra http://localhost:5173 em duas abas (cada aba é uma pessoa). "↺ demo" recria a história.
+Abra http://localhost:5173. Sem login configurado, rode com `VITE_AUTH_DEV_ANON=1` e publique
+o módulo com `AUTH_DEV_ANON=1` (veja abaixo): cada aba vira uma pessoa anônima.
+
+## Contas e histórias
+
+Cada pessoa entra com Google e vê só as próprias histórias e as compartilhadas com ela
+(`/home`); uma história abre em `/s/<id>`. O dono compartilha por e-mail como editor ou leitor;
+quem ainda não entrou recebe o acesso no primeiro login.
+
+- **Módulo:** o ID token do Google é o token da conexão. O módulo confere `iss` e `aud`
+  (`GOOGLE_CLIENT_ID`), guarda a conta em `account` e checa o papel (`story_member`) em todo
+  reducer. As tabelas do grafo são privadas; o cliente lê pelas views `cur_*` (a história aberta
+  com `open_story`) e `my_*`.
+- **Login (Pages Functions, `client/functions/api/auth`):** fluxo authorization code + PKCE.
+  O refresh token fica num cookie HttpOnly cifrado com `SESSION_KEY`; o navegador só recebe ID
+  tokens de 1 h por `POST /api/auth/token` e os guarda na memória.
+- **Google Cloud:** cliente OAuth "Web application", com o redirect URI
+  `<origem>/api/auth/callback` de cada ambiente (local: `http://localhost:5173/api/auth/callback`).
+  Prévias do Pages com hash aleatório não conseguem entrar (o Google não aceita curinga).
+
+### Local com login
+
+`client/.env.local` (não versionar). O wrangler lê esse arquivo para as Functions; o Vite também,
+mas só põe no bundle o que começa com `VITE_`, então o segredo não vai para o navegador:
+
+```
+GOOGLE_CLIENT_ID=...apps.googleusercontent.com
+GOOGLE_CLIENT_SECRET=...
+SESSION_KEY=<32 bytes em base64: head -c 32 /dev/urandom | base64>
+APP_ORIGIN=http://localhost:5173
+```
+
+```bash
+GOOGLE_CLIENT_ID=... spacetime publish -s local -p server -y roteiro-google
+```
+
+```bash
+npm --prefix client run build && npm --prefix client run dev:api
+```
+
+```bash
+VITE_STDB_DB=roteiro-google npm --prefix client run dev
+```
+
+O Vite repassa `/api` para as Functions (porta 8788). A IA precisa de um worker ligado ao mesmo
+banco (cada banco local tem o seu):
+
+```bash
+STDB_DB=roteiro-google npm --prefix worker start
+```
+
+### Local sem login
+
+```bash
+AUTH_DEV_ANON=1 spacetime publish -s local -p server -y roteiro-auth
+```
+
+```bash
+VITE_AUTH_DEV_ANON=1 VITE_STDB_DB=roteiro-auth npm --prefix client run dev
+```
+
+`AUTH_DEV_ANON` nunca vai para produção: com ele, qualquer conexão anônima vira conta.
+
+### Testes
+
+```bash
+STDB_DB=roteiro-auth PROD_DB=roteiro-google npm --prefix worker run test:stories
+```
+
+`PROD_DB` (opcional) é um banco sem `AUTH_DEV_ANON`, para conferir que anônimos são recusados.
+Os testes de IA (`npm test`) também precisam de um banco com `AUTH_DEV_ANON=1`.
+
+### Produção
+
+- GitHub (Variables): `GOOGLE_CLIENT_ID`, além das já existentes.
+- Cloudflare Pages (Settings → Variables and Secrets): `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`
+  (secreto) e `SESSION_KEY` (secreto). Trocar a `SESSION_KEY` desloga todo mundo.
+- O CI publica com `--delete-data=on-conflict`: uma mudança de esquema que não dá para migrar
+  apaga os dados do banco de produção (a de histórias por pessoa é uma delas). Mudanças
+  compatíveis mantêm os dados.
 
 Depois de mudar o módulo, regenere os bindings:
 

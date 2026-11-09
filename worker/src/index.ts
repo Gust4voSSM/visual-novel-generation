@@ -24,12 +24,15 @@ const seen = new Set<string>(); // pedidos já tratados por este processo
 const queues = { chat: [] as string[], image: [] as string[] };
 const active = { chat: 0, image: 0 };
 
-function snapshot(): StorySnapshot {
-  const st = [...conn.db.story.iter()].find(r => r.id === 'main');
+// Grafo da história do pedido, pelas views worker_* (as tabelas são privadas).
+function snapshot(storyId: string): StorySnapshot {
+  const st = conn.db.workerStory.id.find(storyId);
   return {
     title: st?.title ?? '', startScene: st?.startScene ?? '',
-    scenes: [...conn.db.scene.iter()].map(s => ({ id: s.id, title: s.title, x: s.x, y: s.y, text: s.text, next: s.next, bg: s.bg })),
-    choices: [...conn.db.choice.iter()].map(c => ({ id: c.id, sceneId: c.sceneId, label: c.label, target: c.target, position: c.position })),
+    scenes: [...conn.db.workerScene.iter()].filter(s => s.storyId === storyId)
+      .map(s => ({ id: s.id, title: s.title, x: s.x, y: s.y, text: s.text, next: s.next, bg: s.bg })),
+    choices: [...conn.db.workerChoice.iter()].filter(c => c.storyId === storyId)
+      .map(c => ({ id: c.id, sceneId: c.sceneId, label: c.label, target: c.target, position: c.position })),
   };
 }
 
@@ -44,7 +47,7 @@ const shortError = (e: unknown) => {
   return /TIMEOUT/.test(m) ? 'TIMEOUT' : /AI_PROVIDER_ERROR/.test(m) ? 'AI_PROVIDER_ERROR' : m.slice(0, 120);
 };
 
-async function runChat(id: string, input: ChatInput) {
+async function runChat(id: string, storyId: string, input: ChatInput) {
   let seq = 0, buf = '', chain = Promise.resolve();
   // Junta os tokens e envia um pedaço a cada FLUSH_MS, em ordem.
   const flush = () => {
@@ -55,7 +58,7 @@ async function runChat(id: string, input: ChatInput) {
   };
   const timer = setInterval(flush, FLUSH_MS);
   try {
-    const out = await withTimeout(TIMEOUT.chat, sig => provider!.chat(input, snapshot(), t => { buf += t; }, sig));
+    const out = await withTimeout(TIMEOUT.chat, sig => provider!.chat(input, snapshot(storyId), t => { buf += t; }, sig));
     flush();
     await chain;
     return { result: out, chunks: seq };
@@ -107,14 +110,14 @@ async function handle(id: string) {
     const input = JSON.parse(job.input);
     let result: unknown, extra = '';
     if (job.kind === 'chat') {
-      const r = await runChat(id, { message: String(input.message ?? ''), context: (input.context ?? { characters: [], backgrounds: [] }) as AiContext });
+      const r = await runChat(id, job.storyId, { message: String(input.message ?? ''), context: (input.context ?? { characters: [], backgrounds: [] }) as AiContext });
       result = r.result;
       extra = `${r.chunks} pedaços`;
     } else if (job.kind === 'character') result = await runCharacter(input);
     else if (job.kind === 'background') result = await runBackground(input);
-    else if (job.kind === 'scene') result = await withTimeout(TIMEOUT.text, sig => provider!.scene(input, snapshot(), sig));
-    else if (job.kind === 'complete') result = await withTimeout(TIMEOUT.text, sig => provider!.complete(input, snapshot(), sig));
-    else if (job.kind === 'option') result = await withTimeout(TIMEOUT.text, sig => provider!.option(input, snapshot(), sig));
+    else if (job.kind === 'scene') result = await withTimeout(TIMEOUT.text, sig => provider!.scene(input, snapshot(job.storyId), sig));
+    else if (job.kind === 'complete') result = await withTimeout(TIMEOUT.text, sig => provider!.complete(input, snapshot(job.storyId), sig));
+    else if (job.kind === 'option') result = await withTimeout(TIMEOUT.text, sig => provider!.option(input, snapshot(job.storyId), sig));
     else throw new Error('INVALID_KIND');
     await conn.reducers.completeJob({ id, result: JSON.stringify(result) });
     log(`ok   ${job.kind.padEnd(10)} ${id} fila ${waited} ms · execução ${Math.round(performance.now() - t0)} ms ${extra}`);
@@ -167,7 +170,7 @@ conn = DbConnection.builder()
         log('fila assinada; aguardando pedidos');
       })
       .onError((_ctx, err) => console.error('erro na assinatura', err))
-      .subscribe(['SELECT * FROM worker_queue', 'SELECT * FROM story', 'SELECT * FROM scene', 'SELECT * FROM choice']);
+      .subscribe(['SELECT * FROM worker_queue', 'SELECT * FROM worker_story', 'SELECT * FROM worker_scene', 'SELECT * FROM worker_choice']);
   })
   .onDisconnect(() => log('desconectado; reconectando…'))
   .onConnectError((_ctx, err) => { console.error('falha ao conectar', err); })

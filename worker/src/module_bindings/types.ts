@@ -10,9 +10,26 @@ import {
   type Infer as __Infer,
 } from "spacetimedb";
 
+export const Account = __t.object("Account", {
+  identity: __t.identity(),
+  email: __t.string(),
+  name: __t.string(),
+  picture: __t.string(),
+  createdAt: __t.timestamp(),
+  lastSeenAt: __t.timestamp(),
+});
+export type Account = __Infer<typeof Account>;
+
+export const ActiveStory = __t.object("ActiveStory", {
+  identity: __t.identity(),
+  storyId: __t.string(),
+});
+export type ActiveStory = __Infer<typeof ActiveStory>;
+
 export const AiJob = __t.object("AiJob", {
   id: __t.string(),
   requester: __t.identity(),
+  storyId: __t.string(),
   kind: __t.string(),
   input: __t.string(),
   status: __t.string(),
@@ -41,6 +58,7 @@ export type ChatChunk = __Infer<typeof ChatChunk>;
 export const ChatMessage = __t.object("ChatMessage", {
   id: __t.string(),
   user: __t.identity(),
+  storyId: __t.string(),
   jobId: __t.string(),
   role: __t.string(),
   content: __t.string(),
@@ -51,6 +69,7 @@ export type ChatMessage = __Infer<typeof ChatMessage>;
 
 export const Choice = __t.object("Choice", {
   id: __t.string(),
+  storyId: __t.string(),
   sceneId: __t.string(),
   label: __t.string(),
   target: __t.string(),
@@ -64,7 +83,35 @@ export const Config = __t.object("Config", {
 });
 export type Config = __Infer<typeof Config>;
 
+export const CurAccount = __t.object("CurAccount", {});
+export type CurAccount = __Infer<typeof CurAccount>;
+
+export const CurChoice = __t.object("CurChoice", {});
+export type CurChoice = __Infer<typeof CurChoice>;
+
+export const CurInvite = __t.object("CurInvite", {});
+export type CurInvite = __Infer<typeof CurInvite>;
+
+export const CurLocks = __t.object("CurLocks", {});
+export type CurLocks = __Infer<typeof CurLocks>;
+
+export const CurMember = __t.object("CurMember", {});
+export type CurMember = __Infer<typeof CurMember>;
+
+export const CurPresence = __t.object("CurPresence", {});
+export type CurPresence = __Infer<typeof CurPresence>;
+
+export const CurProfile = __t.object("CurProfile", {});
+export type CurProfile = __Infer<typeof CurProfile>;
+
+export const CurScene = __t.object("CurScene", {});
+export type CurScene = __Infer<typeof CurScene>;
+
+export const CurStory = __t.object("CurStory", {});
+export type CurStory = __Infer<typeof CurStory>;
+
 export const Drags = __t.object("Drags", {
+  storyId: __t.string(),
   connectionId: __t.connectionId(),
   identity: __t.identity(),
   moves: __t.string(),
@@ -74,11 +121,15 @@ export type Drags = __Infer<typeof Drags>;
 
 export const Locks = __t.object("Locks", {
   target: __t.string(),
+  storyId: __t.string(),
   connectionId: __t.connectionId(),
   identity: __t.identity(),
   expiresAt: __t.timestamp(),
 });
 export type Locks = __Infer<typeof Locks>;
+
+export const MyAccount = __t.object("MyAccount", {});
+export type MyAccount = __Infer<typeof MyAccount>;
 
 export const MyAiJob = __t.object("MyAiJob", {});
 export type MyAiJob = __Infer<typeof MyAiJob>;
@@ -86,9 +137,16 @@ export type MyAiJob = __Infer<typeof MyAiJob>;
 export const MyChatMessage = __t.object("MyChatMessage", {});
 export type MyChatMessage = __Infer<typeof MyChatMessage>;
 
+export const MyMemberships = __t.object("MyMemberships", {});
+export type MyMemberships = __Infer<typeof MyMemberships>;
+
+export const MyStories = __t.object("MyStories", {});
+export type MyStories = __Infer<typeof MyStories>;
+
 export const Presence = __t.object("Presence", {
   connectionId: __t.connectionId(),
   identity: __t.identity(),
+  storyId: __t.string(),
   cursorX: __t.f64(),
   cursorY: __t.f64(),
   hasCursor: __t.bool(),
@@ -105,6 +163,7 @@ export type Profile = __Infer<typeof Profile>;
 
 export const Scene = __t.object("Scene", {
   id: __t.string(),
+  storyId: __t.string(),
   title: __t.string(),
   x: __t.f64(),
   y: __t.f64(),
@@ -121,10 +180,30 @@ export type Scene = __Infer<typeof Scene>;
 
 export const Story = __t.object("Story", {
   id: __t.string(),
+  ownerId: __t.identity(),
   title: __t.string(),
   startScene: __t.string(),
+  createdAt: __t.timestamp(),
+  updatedAt: __t.timestamp(),
 });
 export type Story = __Infer<typeof Story>;
+
+export const StoryInvite = __t.object("StoryInvite", {
+  id: __t.u64(),
+  storyId: __t.string(),
+  email: __t.string(),
+  role: __t.string(),
+  createdAt: __t.timestamp(),
+});
+export type StoryInvite = __Infer<typeof StoryInvite>;
+
+export const StoryMember = __t.object("StoryMember", {
+  id: __t.u64(),
+  storyId: __t.string(),
+  userId: __t.identity(),
+  role: __t.string(),
+});
+export type StoryMember = __Infer<typeof StoryMember>;
 
 export const Sweep = __t.object("Sweep", {
   scheduledId: __t.u64(),
@@ -132,6 +211,15 @@ export const Sweep = __t.object("Sweep", {
 });
 export type Sweep = __Infer<typeof Sweep>;
 
+export const WorkerChoice = __t.object("WorkerChoice", {});
+export type WorkerChoice = __Infer<typeof WorkerChoice>;
+
 export const WorkerQueue = __t.object("WorkerQueue", {});
 export type WorkerQueue = __Infer<typeof WorkerQueue>;
+
+export const WorkerScene = __t.object("WorkerScene", {});
+export type WorkerScene = __Infer<typeof WorkerScene>;
+
+export const WorkerStory = __t.object("WorkerStory", {});
+export type WorkerStory = __Infer<typeof WorkerStory>;
 

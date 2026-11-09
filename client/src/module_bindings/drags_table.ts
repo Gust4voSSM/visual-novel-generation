@@ -11,6 +11,7 @@ import {
 } from "spacetimedb";
 
 export default __t.row({
+  storyId: __t.string().name("story_id"),
   connectionId: __t.connectionId().name("connection_id"),
   identity: __t.identity(),
   moves: __t.string(),

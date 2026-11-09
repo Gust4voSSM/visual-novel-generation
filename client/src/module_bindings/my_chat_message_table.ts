@@ -13,6 +13,7 @@ import {
 export default __t.row({
   id: __t.string().primaryKey(),
   user: __t.identity(),
+  storyId: __t.string().name("story_id"),
   jobId: __t.string().name("job_id"),
   role: __t.string(),
   content: __t.string(),

@@ -11,10 +11,17 @@ import {
 } from "spacetimedb";
 
 export default __t.row({
-  connectionId: __t.connectionId().primaryKey().name("connection_id"),
-  identity: __t.identity(),
-  cursorX: __t.f64().name("cursor_x"),
-  cursorY: __t.f64().name("cursor_y"),
-  hasCursor: __t.bool().name("has_cursor"),
-  updatedAt: __t.timestamp().name("updated_at"),
+  id: __t.string().primaryKey(),
+  storyId: __t.string().name("story_id"),
+  title: __t.string(),
+  x: __t.f64(),
+  y: __t.f64(),
+  bg: __t.string(),
+  chars: __t.string(),
+  kind: __t.string(),
+  speaker: __t.string(),
+  text: __t.string(),
+  next: __t.string(),
+  ai: __t.string(),
+  updatedBy: __t.identity().name("updated_by"),
 });
