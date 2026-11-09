@@ -12,6 +12,7 @@ import {
 
 export default {
   id: __t.string(),
+  storyId: __t.string(),
   kind: __t.string(),
   input: __t.string(),
 };
