@@ -107,6 +107,8 @@ state.scenes=[];state.title='';state.start='';
 const $=s=>document.querySelector(s);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const scene=id=>state.scenes.find(s=>s.id===id);
+// Rascunho da proposta do chat aberta no canvas (veja renderDraft): {p, card, plan, t0, view}.
+let draft=null;const draftsEl=$('#drafts');
 const charById=id=>state.characters.find(c=>c.id===id);
 const bgById=id=>state.backgrounds.find(b=>b.id===id);
 const spriteOf=(c,sid)=>c&&c.sprites.find(s=>s.id===sid);
@@ -212,6 +214,7 @@ function stageMini(s){const bg=bgById(s.bg);const n=s.chars.length,pos=SLOTS[n]|
 function rowFresh(id){const t=freshRows.get(id);if(t==null)return'';const a=ago(t);if(a>700){freshRows.delete(id);return'';}return` fresh" style="animation-delay:-${a}ms`;}
 function nodeHTML(s,ws,reach,lnk,incoming){const g=genOf(s);const isStart=state.start===s.id;const exp=expanded===s.id&&!g;const avail=state.characters.filter(c=>!s.chars.some(x=>x.c===c.id));
   const cls=['node'];if(exp)cls.push('exp');if(s.ai)cls.push('ai');if(selected.has(s.id))cls.push('sel');if(!reach.has(s.id)&&!g)cls.push('unreach');
+  const dv=draft&&draft.view;if(dv){if(dv.del.has(s.id))cls.push('ddel');if(dv.edit.has(s.id))cls.push('dunder');}
   const rd=remoteDrag.get(s.id);if(rd)cls.push('rdrag');
   const lkTitle=lockOf('scene:'+s.id+':title'),lkText=lockOf('scene:'+s.id+':text');
   let style=`left:${dispX(s)}px;top:${dispY(s)}px${rd?`;--rc:${rd.color}`:''}`;const f=fresh.get(s.id);
@@ -243,6 +246,7 @@ function renderNodes(){const{list,reach}=warnings();const ws=new Set(list.map(w=
   const focus=document.activeElement;let keep=null;if(focus&&nodesEl.contains(focus)){const n=focus.closest('.node');keep={id:n?.dataset.id,act:focus.dataset.act,i:focus.dataset.i,s:focus.selectionStart,e:focus.selectionEnd};}
   const prevTops=new Map;nodesEl.querySelectorAll('.node').forEach(n=>prevTops.set(n.dataset.id,parseFloat(getComputedStyle(n).top)));
   const prevMid=new Map;nodesEl.querySelectorAll('.node').forEach(n=>{const m=n.querySelector('.mid');if(m)prevMid.set(n.dataset.id,{h:m.offsetHeight,exp:n.classList.contains('exp')});});
+  renderDraft();
   nodesEl.innerHTML=state.scenes.map(s=>nodeHTML(s,ws,reach,lnk,inc)).join('');
   applyPush(prevTops);
   if(!reduced)prevMid.forEach((v,id)=>{const n=nodeEl(id);const m=n&&n.querySelector('.mid');if(!m)return;const ex=n.classList.contains('exp');if(ex===v.exp)return;const h=m.offsetHeight;m.animate([{height:v.h+'px'},{height:h+'px'}],{duration:360,easing:'cubic-bezier(.2,1,.3,1)'});n.classList.add(ex?'opening':'closing');setTimeout(()=>n.classList.remove('opening','closing'),380);animUntil=performance.now()+400;});
@@ -321,7 +325,8 @@ function nodeShake(id){const el=nodeEl(id);if(el){el.classList.remove('err');voi
 
 /* ---------- create / connect / cut ---------- */
 function blankScene(x,y){return{id:uid('s'),title:'Nova cena',x:Math.round(x),y:Math.round(y),bg:null,chars:[],kind:'narration',speaker:null,text:'',choices:[],next:null};}
-function freeSpot(sp,k=1){let x=sp.x+120,y=sp.y-20;const clash=(cx,cy)=>state.scenes.some(n=>cx<n.x+330&&cx+340*(k-1)+330>n.x&&cy<dispY(n)+nodeH(n.id)+30&&cy+480>dispY(n));for(let i=0;i<40;i++){if(!clash(x,y))break;y+=90;if(i%8===7){x+=340;y=sp.y-20;}}return{x,y};}
+// extra: cenas que ainda não estão no grafo (rascunho), como {x,y}.
+function freeSpot(sp,k=1,extra=[]){let x=sp.x+120,y=sp.y-20;const hit=(cx,cy,nx,ny,nh)=>cx<nx+330&&cx+340*(k-1)+330>nx&&cy<ny+nh+30&&cy+480>ny;const clash=(cx,cy)=>state.scenes.some(n=>hit(cx,cy,n.x,dispY(n),nodeH(n.id)))||extra.some(n=>hit(cx,cy,n.x,n.y,300));for(let i=0;i<40;i++){if(!clash(x,y))break;y+=90;if(i%8===7){x+=340;y=sp.y-20;}}return{x,y};}
 function createScene(src,ch,at,ai,opts={}){const sp=outPos(src.id,ch)||{x:src.x+300,y:src.y+200};const click=!at;const p=at||freeSpot(sp);
   if(!opts.skipUndo)pushUndo();const ns=blankScene(p.x,click?p.y:p.y-20);state.scenes.push(ns);const prevT=targetOf(src,ch);setTarget(src,ch,ns.id);const key=edgeKey(src.id,ch);
   fresh.set(ns.id,{t0:performance.now(),cls:ai?'pop-ai':'pop'});
@@ -659,70 +664,176 @@ function completeText(s){if(gens.has(s.id))return;const prev=snapStr();const old
    com as propostas, por my_chat_message. A conversa fica no servidor e volta ao recarregar. */
 const log=$('#chatLog');
 function addMsg(html,who){const d=document.createElement('div');d.className='msg '+who;d.innerHTML=html;log.appendChild(d);log.scrollTop=log.scrollHeight;return d;}
-const CHAT_HELLO='Conheço o grafo, o elenco e os backgrounds desta história. Peça algo como <b>“crie a cena da ação sem destino”</b> ou <b>“continue a partir do final”</b>. Toda mudança chega como proposta para você aceitar.';
+const CHAT_HELLO='Conheço o grafo, o elenco e os backgrounds desta história. Peça algo como <b>“continue a partir do final com três cenas”</b>, <b>“reescreva a cena do farol como diálogo”</b> ou <b>“remova o final triste”</b>. Toda mudança chega como proposta para você ver no canvas e aceitar.';
 addMsg(CHAT_HELLO,'bot');
 const chatJobs=new Map;const chatSeen=new Set; // jobId -> {el, next, held, text, done}
 let chatLive=false; // depois do histórico: propostas novas abrem o rascunho sozinhas
 const chatDropped=new Set; // pedidos em andamento quando o chat foi limpo: pedaços e falhas são ignorados
-function chatJob(jobId){let j=chatJobs.get(jobId);if(!j){j={el:addMsg('<span class="typingdots"><i></i><i></i><i></i></span>','bot'),next:0,held:new Map,text:'',done:false};chatJobs.set(jobId,j);}return j;}
-function onChatChunk(row){if(chatDropped.has(row.jobId))return;const j=chatJob(row.jobId);if(j.done)return;j.held.set(row.seq,row.text);
+// Faixas de seq dos pedaços (veja runChat no worker): texto da resposta, resumo do raciocínio
+// e andamento da proposta (JSON; vale o último).
+const THOUGHT_SEQ=0x80000000,PROGRESS_SEQ=0xC0000000;
+// Cartão provisório enquanto a proposta chega: o que já deu para ler dela.
+function showBuilding(j,seq,text){if(seq<j.pseq)return;j.pseq=seq;let p;try{p=JSON.parse(text);}catch(_){return;}
+  if(!j.build){j.build=document.createElement('div');j.build.className='proposal building';j.build.innerHTML=`<h3>${SPARK}<span class="blabel"></span><span class="typingdots"><i></i><i></i><i></i></span></h3><div class="bbody"></div>`;j.el.after(j.build);j.bn=0;}
+  const label=p.attempt>1?`corrigindo a proposta · tentativa ${p.attempt}`:'montando proposta';const lb=j.build.querySelector('.blabel');if(lb.textContent!==label){lb.textContent=label;j.bn=0;}
+  const items=[...p.criar.map(t=>['Criar',t]),...p.alterar.map(t=>['Alterar',t]),...p.remover.map(t=>['Remover',t])];
+  if(p.ligar)items.push([`${p.ligar} ligaç${p.ligar>1?'ões':'ão'}`,'']);
+  // Só os itens novos entram com animação; o resto é redesenhado parado.
+  j.build.querySelector('.bbody').innerHTML=items.length?`<ul>${items.map(([v,t],i)=>`<li${i>=j.bn&&!(i===items.length-1&&p.ligar&&j.bl)?' class="new"':''}>${t?`${v} “${esc(t)}”`:v}</li>`).join('')}</ul>`:'<div class="hint">planejando as mudanças…</div>';
+  j.bn=items.length-(p.ligar?1:0);j.bl=!!p.ligar;log.scrollTop=log.scrollHeight;}
+function endBuilding(j){j.build?.remove();j.build=null;}
+function chatJob(jobId){let j=chatJobs.get(jobId);if(!j){
+    const el=addMsg('<details class="think" hidden><summary><span class="think-label">Pensando…</span></summary><div class="think-body"></div></details><div class="mtext"><span class="typingdots"><i></i><i></i><i></i></span></div>','bot');
+    j={el,txt:el.querySelector('.mtext'),think:el.querySelector('.think'),next:0,held:new Map,text:'',tnext:0,theld:new Map,thought:'',t0:0,tText:0,tLast:0,pseq:-1,build:null,done:false};
+    // Abrir ou fechar à mão vale até o fim: o bloco deixa de abrir e fechar sozinho.
+    j.think.querySelector('summary').addEventListener('click',()=>{j.think.dataset.touched='1';});
+    chatJobs.set(jobId,j);}
+  return j;}
+const thoughtHTML=t=>esc(t).replace(/\*\*(.+?)\*\*/g,'<b>$1</b>');
+function setThought(j,t,live){j.thought=t;j.think.hidden=!t;if(!t)return;const b=j.think.querySelector('.think-body');b.innerHTML=thoughtHTML(t);
+  if(live&&!j.tText&&!j.think.dataset.touched)j.think.open=true;b.scrollTop=b.scrollHeight;}
+// Recolhe o raciocínio quando a resposta começa; o tempo vai até o último pedaço de raciocínio ou o 1º de texto.
+function endThought(j){if(!j.thought)return;const end=Math.max(j.tText,j.tLast);const s=j.t0&&end?Math.max(1,Math.round((end-j.t0)/1000)):0;
+  j.think.querySelector('.think-label').textContent=s?`Pensou por ${s} s`:'Raciocínio';if(!j.think.dataset.touched)j.think.open=false;}
+function onChatChunk(row){if(chatDropped.has(row.jobId))return;const j=chatJob(row.jobId);if(j.done)return;
+  if(row.seq>=PROGRESS_SEQ){showBuilding(j,row.seq,row.text);return;}
+  if(row.seq>=THOUGHT_SEQ){const now=performance.now();j.t0||=now;j.tLast=now;j.theld.set(row.seq-THOUGHT_SEQ,row.text);let t=j.thought;
+    while(j.theld.has(j.tnext)){t+=j.theld.get(j.tnext);j.theld.delete(j.tnext);j.tnext++;}
+    setThought(j,t,true);log.scrollTop=log.scrollHeight;return;}
+  j.held.set(row.seq,row.text);
   while(j.held.has(j.next)){j.text+=j.held.get(j.next);j.held.delete(j.next);j.next++;}
-  if(j.text){j.el.innerHTML=esc(j.text)+'<span class="caret"></span>';log.scrollTop=log.scrollHeight;}}
-function chatJobChanged(row){if(row.status!=='failed'||chatDropped.has(row.id))return;const j=chatJob(row.id);if(j.done)return;j.done=true;j.el.innerHTML=(j.text?esc(j.text)+'<br>':'')+`<span style="color:#ffb4a8">A IA falhou: ${esc(aiMessage(row.error))}</span>`;}
+  if(j.text){if(!j.tText){j.tText=performance.now();endThought(j);}j.txt.innerHTML=esc(j.text)+'<span class="caret"></span>';log.scrollTop=log.scrollHeight;}}
+function chatJobChanged(row){if(row.status!=='failed'||chatDropped.has(row.id))return;const j=chatJob(row.id);if(j.done)return;j.done=true;endThought(j);endBuilding(j);j.txt.innerHTML=(j.text?esc(j.text)+'<br>':'')+`<span style="color:#ffb4a8">A IA falhou: ${esc(aiMessage(row.error))}</span>`;}
 function renderChatRow(row){if(chatSeen.has(row.id))return;chatSeen.add(row.id);
   if(row.role==='user'){addMsg(esc(row.content),'me');const job=conn.db.myAiJob.id.find(row.jobId);if(job&&(job.status==='pending'||job.status==='running'))chatJob(row.jobId);else if(job)chatJobChanged(job);return;}
-  const j=chatJob(row.jobId);j.done=true;j.el.innerHTML=esc(row.content);
-  let props=[];try{props=JSON.parse(row.proposals);}catch(_){}const cards=props.map(p=>log.appendChild(proposalCard(p)));log.scrollTop=log.scrollHeight;
+  const j=chatJob(row.jobId);j.done=true;endBuilding(j);j.txt.innerHTML=esc(row.content);
+  // O raciocínio completo fica no resultado do pedido: vale depois de recarregar e cobre pedaços perdidos.
+  try{const r=JSON.parse(conn.db.myAiJob.id.find(row.jobId)?.result||'{}');if(r.thoughts)setThought(j,r.thoughts,false);}catch(_){}
+  endThought(j);
+  let props=[];try{props=JSON.parse(row.proposals);}catch(_){}const cards=props.map((p,i)=>log.appendChild(proposalCard(p,row.id+':'+i)));log.scrollTop=log.scrollHeight;
   const i=chatLive?cards.findIndex(c=>!c.classList.contains('done')):-1;if(i>=0)showDraft(props[i],cards[i]);}
-/* Rascunho da proposta: as cenas novas aparecem tracejadas no canvas, onde vão cair, sem entrar no grafo. */
-const draftsEl=$('#drafts');let draft=null; // {p, card, plan}
-// Saída de onde a proposta parte e as cenas novas com posição: lado a lado, num espaço livre.
-function proposalPlan(p){const ns=p.ops.filter(o=>o.op==='upsert_scene'&&!scene(o.scene.id)).map(o=>o.scene);if(!ns.length)return null;
-  const link=p.ops.find(o=>o.op==='upsert_choice'&&o.choice.target===ns[0].id);if(!link)return null;
-  const made=p.ops.find(o=>o.op==='upsert_choice'&&o.choice.id===link.choice.id&&o.choice.sceneId);
-  // Ação nova numa cena final: o fio sai da saída única dela.
-  const sid=made?made.choice.sceneId:state.scenes.find(s=>s.choices.some(c=>c.id===link.choice.id))?.id,ch=made?'':link.choice.id;
-  const src=sid&&scene(sid);if(!src)return null;
-  const at=freeSpot(outPos(sid,ch)||{x:src.x+300,y:src.y+200},ns.length);
-  return{sid,ch,scenes:ns.map((s,i)=>({...s,x:Math.round(at.x+340*i),y:Math.round(at.y)}))};}
-function draftHTML(s,i,n){let chars=[];try{chars=JSON.parse(s.chars||'[]');}catch(_){}
-  const spk=s.kind==='dialogue'?charById(s.speaker):null;
-  const sum=s.text?`${spk?`<span class="who" style="color:${spk.color||'var(--text)'}">${esc(spk.name)}</span>`:''}<span class="${spk?'':'narr'}">${esc(s.text)}</span>`:'<span class="none">sem texto</span>';
-  return`<div class="node dnode" style="left:${s.x}px;top:${s.y}px;animation-delay:${i*90}ms"><div class="nhead"><span class="port in"></span><span class="dtitle">${esc(s.title)}</span><span class="tag ai">${SPARK}rascunho</span>${i<n-1?'<span class="port out"></span>':''}</div><div class="mid"><div class="sec">${stageMini({...s,chars})}<div class="sum">${sum}</div></div></div></div>`;}
-function draftWires(){if(!draft)return'';const ins=[...draftsEl.querySelectorAll('.port.in')].map(centerOf),outs=[...draftsEl.querySelectorAll('.port.out')].map(centerOf);
-  const pairs=[[outPos(draft.plan.sid,draft.plan.ch),ins[0]],...outs.map((a,i)=>[a,ins[i+1]])];
-  return pairs.filter(([a,b])=>a&&b).map(([a,b])=>`<path class="wpath" d="${curve(a,b)}" style="stroke:#a78bfa;stroke-width:2.5px;stroke-dasharray:8 6;opacity:.85"/>`).join('');}
+/* Rascunho da proposta: o canvas mostra a história como ficaria, sem mexer no grafo. Cenas novas
+   aparecem tracejadas onde vão cair, cenas alteradas mostram a versão nova no lugar da atual, cenas
+   removidas ficam apagadas em vermelho; fios novos são tracejados e fios que somem ficam vermelhos. */
+// Cenas que a proposta cria. Propostas antigas não marcam: vale o upsert de cena que ainda não existe.
+const createdOf=p=>p.created||p.ops.filter(o=>o.op==='upsert_scene'&&!scene(o.scene.id)).map(o=>o.scene.id);
+const choicesOfFlat=(f,sid)=>[...f.choices].filter(([,c])=>c.sceneId===sid).sort((a,b)=>a[1].position-b[1].position);
+// key -> {from, ch, to}, como edges(), sobre um grafo plano.
+function flatEdges(f){const out=new Map;for(const[sid,s]of f.scenes){const cs=choicesOfFlat(f,sid);
+    if(cs.length){for(const[cid,c]of cs)if(c.target&&f.scenes.has(c.target))out.set(edgeKey(sid,cid),{from:sid,ch:cid,to:c.target});}
+    else if(s.next&&f.scenes.has(s.next))out.set(edgeKey(sid,''),{from:sid,ch:'',to:s.next});}
+  return out;}
+// gone: cenas removidas; perder o fio para uma delas não conta como alteração (o fio vermelho já mostra).
+function sceneChanged(a,b,id,gone=new Set){const x=a.scenes.get(id),y=b.scenes.get(id),t=v=>gone.has(v)?'':v;
+  for(const k of['title','bg','chars','kind','speaker','text'])if(x[k]!==y[k])return true;if(t(x.next)!==y.next)return true;
+  const cs=(f,m)=>JSON.stringify(choicesOfFlat(f,id).map(([cid,c])=>[cid,c.label,m(c.target)]));return cs(a,t)!==cs(b,v=>v);}
+// Posição das cenas novas: perto da saída que leva até elas, sem cobrir nada; uma sequência fica lado a lado.
+function proposalPlan(p){const before=flatOf(state);const created=new Set(createdOf(p).filter(id=>!before.scenes.has(id)));
+  const ops=JSON.parse(JSON.stringify(p.ops));const es=[...flatEdges(applyOps(cloneFlat(before),ops)).values()];
+  const pos=new Map,placed=[];const kids=new Map;
+  const chain=id=>{let n=0,cur=id;const seen=new Set;while(cur&&created.has(cur)&&!pos.has(cur)&&!seen.has(cur)){seen.add(cur);n++;cur=es.find(e=>e.from===cur&&created.has(e.to))?.to;}return Math.max(1,n);};
+  const put=(id,at)=>{pos.set(id,{x:Math.round(at.x),y:Math.round(at.y)});placed.push(pos.get(id));};
+  while(pos.size<created.size){const todo=[...created].filter(id=>!pos.has(id));
+    // Primeiro quem sai de uma cena já no canvas, depois quem sai de uma cena nova já posicionada.
+    let e=null;for(const id of todo){e=es.find(x=>x.to===id&&!created.has(x.from)&&scene(x.from));if(e)break;}
+    if(e){const s=scene(e.from);put(e.to,freeSpot(outPos(e.from,e.ch)||{x:s.x+300,y:s.y+200},chain(e.to),placed));continue;}
+    for(const id of todo){e=es.find(x=>x.to===id&&pos.has(x.from));if(e)break;}
+    if(e){const pp=pos.get(e.from),k=kids.get(e.from)||0;kids.set(e.from,k+1);put(e.to,freeSpot({x:pp.x+220,y:pp.y+20+k*280},chain(e.to),placed));continue;}
+    // Sem ligação: à direita de tudo.
+    const right=Math.max(0,...state.scenes.map(s=>s.x),...placed.map(q=>q.x)),top=Math.min(...state.scenes.map(s=>s.y),0);
+    put(todo[0],freeSpot({x:right+220,y:top+20},chain(todo[0]),placed));}
+  for(const o of ops)if(o.op==='upsert_scene'&&pos.has(o.scene.id))Object.assign(o.scene,pos.get(o.scene.id));
+  return{ops,created};}
+// O que o rascunho mostra, contra o estado atual (o grafo pode mudar com o rascunho aberto).
+function draftView(){if(!draft){return null;}const before=flatOf(state),after=applyOps(cloneFlat(before),draft.plan.ops);
+  const created=new Set([...draft.plan.created].filter(id=>after.scenes.has(id)&&!before.scenes.has(id)));
+  const del=new Set([...before.scenes.keys()].filter(id=>!after.scenes.has(id)));
+  const edit=new Set([...before.scenes.keys()].filter(id=>after.scenes.has(id)&&sceneChanged(before,after,id,del)));
+  const be=flatEdges(before),ae=flatEdges(after),drawn=id=>created.has(id)||edit.has(id);
+  const add=[...ae].filter(([k,e])=>be.get(k)?.to!==e.to||drawn(e.from)||drawn(e.to)).map(([,e])=>e);
+  const cut=[...be].filter(([k,e])=>ae.get(k)?.to!==e.to).map(([,e])=>e);
+  return draft.view={before,after,created,del,edit,add,cut};}
+function draftHTML(id,v,f,tag,i){let chars=[];try{chars=JSON.parse(v.chars||'[]');}catch(_){}
+  const spk=v.kind==='dialogue'?charById(v.speaker):null;const s=scene(id);
+  const sum=v.text?`${spk?`<span class="who" style="color:${spk.color||'var(--text)'}">${esc(spk.name)}</span>`:''}<span class="${spk?'':'narr'}">${esc(v.text)}</span>`:'<span class="none">sem texto</span>';
+  const cs=choicesOfFlat(f,id);
+  const rows=cs.length?cs.map(([cid,c],k)=>`<div class="orow c${c.target?'':' draft'}"><span class="onum">${k+1}</span><span class="olabel">${c.label?esc(c.label):'<i class="none">sem texto</i>'}</span>${c.target?'':'<span class="tag warn">sem destino</span>'}<span class="port out${c.target?'':' draft'}" data-dout="${id}" data-dch="${cid}"></span></div>`).join('')
+    :`<div class="orow c"><span class="nextlabel">${v.next?'continuar → '+esc(f.scenes.get(v.next)?.title||''):'continuar'}</span><span class="port out" data-dout="${id}" data-dch=""></span></div>`;
+  const at=s?{x:dispX(s),y:dispY(s)}:v;
+  return`<div class="node dnode${s?' dedit':''}" style="left:${at.x}px;top:${at.y}px;animation-delay:${i*90-ago(draft.t0)}ms"><div class="nhead"><span class="port in" data-din="${id}"></span><span class="dtitle">${esc(v.title)}</span><span class="tag ai">${SPARK}${tag}</span></div><div class="mid"><div class="sec">${stageMini({...v,chars})}<div class="sum">${sum}</div></div></div>${rows}</div>`;}
+// Chamado pelo renderNodes: as marcas nas cenas reais e as cenas do rascunho acompanham o grafo.
+function renderDraft(){const v=draftView();if(!v){draftsEl.innerHTML='';return;}let i=0;
+  draftsEl.innerHTML=[...[...v.edit].map(id=>draftHTML(id,v.after.scenes.get(id),v.after,'alterada',i++)),...[...v.created].map(id=>draftHTML(id,v.after.scenes.get(id),v.after,'nova',i++))].join('');}
+function draftWires(){const v=draft&&draft.view;if(!v)return'';
+  const at=(sel,root)=>{const el=root&&root.querySelector(sel);return el?centerOf(el):null;};
+  const drawn=id=>v.created.has(id)||v.edit.has(id);
+  const src=e=>drawn(e.from)?at(`.port.out[data-dout="${e.from}"][data-dch="${e.ch}"]`,draftsEl):outPos(e.from,e.ch);
+  const dst=id=>drawn(id)?at(`.port.in[data-din="${id}"]`,draftsEl):at('.port.in',nodeEl(id));
+  let h='';
+  for(const e of v.cut){const a=outPos(e.from,e.ch),b=at('.port.in',nodeEl(e.to));if(a&&b)h+=`<path class="wpath" d="${curve(a,b)}" style="stroke:#f87171;stroke-width:3px;stroke-dasharray:4 6;opacity:.9"/>`;}
+  for(const e of v.add){const a=src(e),b=dst(e.to);if(a&&b)h+=`<path class="wpath" d="${curve(a,b)}" style="stroke:#a78bfa;stroke-width:2.5px;stroke-dasharray:8 6;opacity:.85"/>`;}
+  return h;}
 function draftBtn(card,on){card.classList.toggle('previewing',on);const b=card.querySelector('[data-draft]');if(b)b.textContent=on?'Ocultar do canvas':'Ver no canvas';}
-function clearDraft(){if(!draft)return;draftBtn(draft.card,false);draft=null;draftsEl.innerHTML='';dirty=true;}
-function showDraft(p,card){clearDraft();const plan=proposalPlan(p);if(!plan){toast('A proposta não vale mais: a saída de origem mudou.','err');return;}
-  draft={p,card,plan};draftBtn(card,true);draftsEl.innerHTML=plan.scenes.map((s,i)=>draftHTML(s,i,plan.scenes.length)).join('');dirty=true;
-  focusAt(plan.scenes[0].x,plan.scenes[0].y);}
-function proposalCard(p){const card=document.createElement('div');card.className='proposal';
-  const newScene=p.ops.find(o=>o.op==='upsert_scene')?.scene.id;const done=newScene&&scene(newScene);
-  card.innerHTML=`<h3>${SPARK}proposta · 1 passo de desfazer</h3><ul>${p.summary.map(t=>`<li>${esc(t)}</li>`).join('')}</ul><div class="row">${done?'<span class="hint">Aceita</span>':'<button class="btn sm violet solid" data-ok>Aceitar</button><button class="btn sm" data-no>Recusar</button><button class="btn sm" data-draft>Ver no canvas</button>'}</div>`;
-  if(done)card.classList.add('done');
-  card.querySelector('[data-ok]')?.addEventListener('click',()=>{if(acceptProposal(p)){card.classList.add('done');card.querySelector('.row').innerHTML='<span class="hint">Aceita · Ctrl+Z desfaz tudo de uma vez</span>';}});
+function clearDraft(){if(!draft)return;draftBtn(draft.card,false);draft=null;renderNodes();}
+function showDraft(p,card){clearDraft();draft={p,card,plan:proposalPlan(p),t0:performance.now()};draftBtn(card,true);renderNodes();
+  const v=draft.view;if(!v.created.size&&!v.edit.size&&!v.del.size&&!v.add.length&&!v.cut.length){clearDraft();toast('A proposta não muda mais nada na história.','err');return;}
+  const first=[...v.created][0];if(first){const q=v.after.scenes.get(first);focusAt(q.x,q.y);return;}
+  const id=[...v.edit,...v.del][0]||v.add[0]?.from||v.cut[0]?.from;if(id)focusScene(id);}
+// Aceita ou recusada fica guardado neste navegador; sem registro, aceita = a história já tem o que ela propõe.
+const PROP_KEY='roteiro:proposta:';
+const propMark=(key,v)=>{try{localStorage.setItem(PROP_KEY+key,v);}catch(_){}};
+function propStatus(p,key){let v=null;try{v=localStorage.getItem(PROP_KEY+key);}catch(_){}if(v)return v;
+  const created=createdOf(p);
+  if(!p.created)return created.length?null:'ok'; // proposta antiga: só criava cenas, e a cena nova já existe
+  if(created.length)return created.some(id=>scene(id))?'ok':null;
+  const f=flatOf(state);return diffFlat(f,applyOps(cloneFlat(f),JSON.parse(JSON.stringify(p.ops)))).length?null:'ok';}
+function proposalCard(p,key){const card=document.createElement('div');card.className='proposal';
+  const created=new Set(createdOf(p)),nNew=created.size,nDel=p.ops.filter(o=>o.op==='delete_scene').length,nEdit=new Set(p.ops.filter(o=>o.op==='upsert_scene'&&!created.has(o.scene.id)).map(o=>o.scene.id)).size;
+  const chips=[nNew&&`+${nNew} cena${nNew>1?'s':''}`,nEdit&&`${nEdit} alterada${nEdit>1?'s':''}`,nDel&&`${nDel} removida${nDel>1?'s':''}`].filter(Boolean).join(' · ');
+  const st=propStatus(p,key);
+  card.innerHTML=`<h3>${SPARK}proposta${chips?' · '+chips:''} · 1 passo de desfazer</h3><ul>${p.summary.map(t=>`<li>${esc(t)}</li>`).join('')}</ul><div class="row">${st?`<span class="hint">${st==='ok'?'Aceita':'Recusada'}</span>`:`<button class="btn sm violet solid" data-ok>Aceitar</button><button class="btn sm" data-no>Recusar</button><button class="btn sm" data-draft>Ver no canvas</button>`}</div>`;
+  if(st)card.classList.add('done');
+  card.querySelector('[data-ok]')?.addEventListener('click',()=>{if(acceptProposal(p)){propMark(key,'ok');card.classList.add('done');card.querySelector('.row').innerHTML='<span class="hint">Aceita · Ctrl+Z desfaz tudo de uma vez</span>';}});
   card.querySelector('[data-draft]')?.addEventListener('click',()=>{if(draft&&draft.card===card)clearDraft();else showDraft(p,card);});
-  card.querySelector('[data-no]')?.addEventListener('click',()=>{if(draft&&draft.card===card)clearDraft();card.classList.add('done');card.querySelector('.row').innerHTML='<span class="hint">Recusada</span>';});
+  card.querySelector('[data-no]')?.addEventListener('click',()=>{if(draft&&draft.card===card)clearDraft();propMark(key,'no');card.classList.add('done');card.querySelector('.row').innerHTML='<span class="hint">Recusada</span>';});
   return card;}
+// Mesmas regras do validate do servidor, em palavras; null se o grafo vale.
+function graphProblem(f){if(!f.scenes.has(f.start))return'a cena inicial seria removida.';const outs=new Map([...f.scenes.keys()].map(id=>[id,[]]));
+  for(const c of f.choices.values()){if(!f.scenes.has(c.sceneId))return ERRS.NOT_FOUND;if(c.target){if(!f.scenes.has(c.target))return ERRS.NOT_FOUND;outs.get(c.sceneId).push(c.target);}}
+  for(const[id,s]of f.scenes){if(s.next){if(choicesOfFlat(f,id).length)return ERRS.BOTH;if(!f.scenes.has(s.next))return ERRS.NOT_FOUND;outs.get(id).push(s.next);}
+    let cast;try{cast=JSON.parse(s.chars);}catch(_){return ERRS.INVALID;}
+    if(cast.length>MAXCH)return ERRS.TOO_MANY;if(new Set(cast.map(x=>x.c)).size!==cast.length)return ERRS.DUP_CHAR;if(s.kind==='dialogue'&&!cast.some(x=>x.c===s.speaker))return ERRS.SPEAKER;}
+  const color=new Map;const visit=id=>{color.set(id,1);for(const n of outs.get(id)){const k=color.get(n)||0;if(k===1||(!k&&visit(n)))return true;}color.set(id,2);return false;};
+  for(const id of outs.keys())if(!color.get(id)&&visit(id))return'as ligações formariam um ciclo.';return null;}
 // Aceitar valida contra o estado atual, que pode ter mudado desde a proposta.
-function acceptProposal(p){const f=flatOf(state);const ops=JSON.parse(JSON.stringify(p.ops));
-  // As cenas caem onde o rascunho mostrou; sem rascunho na tela, o lugar é calculado agora.
-  const plan=draft&&draft.p===p?draft.plan:proposalPlan(p);if(draft&&draft.p===p)clearDraft();
-  // Confere em ordem, como o reducer: uma operação pode usar a ação criada pela anterior.
-  const work=cloneFlat(f);
-  for(const o of ops){if(o.op==='upsert_choice'){const c=o.choice;const sid=c.sceneId??work.choices.get(c.id)?.sceneId;
-      if(!sid||!work.scenes.has(sid)){toast('A proposta não vale mais: a cena de origem foi apagada.','err');return false;}
-      const cur=f.choices.get(c.id);if(cur&&cur.target&&c.target&&cur.target!==c.target&&f.scenes.has(cur.target)){toast('A proposta não vale mais: essa ação já foi ligada a outra cena.','err');return false;}}
-    applyOps(work,[o]);}
-  const sop=ops.find(o=>o.op==='upsert_scene'&&!f.scenes.has(o.scene.id));
-  for(const o of ops){const d=o.op==='upsert_scene'&&plan?.scenes.find(x=>x.id===o.scene.id);if(d){o.scene.x=d.x;o.scene.y=d.y;}}
-  pushUndo();applyOps(f,ops);writeFlat(f);
-  if(sop){const ns=scene(sop.scene.id);if(ns){ns.ai=true;fresh.set(ns.id,{t0:performance.now(),cls:'pop-ai'});reveal.set(ns.id,performance.now());setTimeout(()=>reveal.delete(ns.id),1700);setTimeout(()=>{const t=scene(ns.id);if(t){t.ai=false;refresh();}},2600);}}
-  refresh();if(sop){ensureVisible(sop.scene.id);const n=scene(sop.scene.id);if(n)burst(n.x,n.y+20,'ai');shake();}return true;}
+function acceptProposal(p){const f=flatOf(state);
+  // As cenas novas caem onde o rascunho mostrou; sem rascunho na tela, o lugar é calculado agora.
+  const plan=draft&&draft.p===p?draft.plan:proposalPlan(p);
+  // Alterar uma cena ou ação que alguém apagou recriaria a linha pela metade.
+  const made=new Set(plan.created);let stale=null;
+  for(const o of plan.ops){if(o.op==='upsert_scene'&&!made.has(o.scene.id)&&!f.scenes.has(o.scene.id)){stale='uma das cenas que ela altera foi apagada.';break;}
+    if(o.op==='upsert_choice'){const c=o.choice;if(c.sceneId){made.add(c.id);if(!f.scenes.has(c.sceneId)&&!made.has(c.sceneId)){stale='a cena de origem foi apagada.';break;}}
+      else if(!f.choices.has(c.id)&&!made.has(c.id)){stale='uma das ações que ela usa foi apagada.';break;}}}
+  const err=stale||graphProblem(applyOps(cloneFlat(f),plan.ops));
+  if(err){toast('A proposta não vale mais: '+err,'err');return false;}
+  if(draft&&draft.p===p)clearDraft();
+  const before=cloneFlat(f);pushUndo();applyOps(f,plan.ops);writeFlat(f);
+  const now=performance.now(),born=[...plan.created].filter(id=>scene(id)),gone=[...before.scenes.keys()].filter(id=>!f.scenes.has(id));
+  gone.forEach(id=>{selected.delete(id);gens.delete(id);});
+  const changed=[...f.scenes.keys()].filter(id=>before.scenes.has(id)&&sceneChanged(before,f,id,new Set(gone)));
+  for(const id of [...born,...changed]){const ns=scene(id);ns.ai=true;fresh.set(id,{t0:now,cls:'pop-ai'});reveal.set(id,now);setTimeout(()=>reveal.delete(id),1700);setTimeout(()=>{const t=scene(id);if(t){t.ai=false;refresh();}},2600);}
+  refresh();const first=born[0]||changed[0];if(first){ensureVisible(first);const n=scene(first);burst(n.x,n.y+20,'ai');shake();}
+  if(gone.length)toast(gone.length>1?`${gone.length} cenas removidas`:'Cena removida','ai');
+  return true;}
+// Conversa anterior para a IA, mais antiga primeiro, com cada proposta resumida e o que o usuário decidiu.
+const PROP_STATE={ok:'aceita',no:'recusada'};
+function chatHistory(){return[...conn.db.myChatMessage.iter()].sort((a,b)=>Number(a.createdAt.microsSinceUnixEpoch-b.createdAt.microsSinceUnixEpoch)||(a.role==='user'?-1:1)).map(r=>{
+  let content=r.content;let props=[];try{props=JSON.parse(r.proposals);}catch(_){}
+  props.forEach((p,i)=>{content+=`\n\n[Proposta ${i+1}, ${PROP_STATE[propStatus(p,r.id+':'+i)]||'pendente: o usuário ainda não decidiu'}]\n`+p.summary.map(l=>'- '+l).join('\n');});
+  return{role:r.role==='user'?'user':'assistant',content};});}
 $('#chatForm').onsubmit=e=>{e.preventDefault();const t=$('#chatInput').value.trim();if(!t)return;if(!connected){toast('Sem conexão com o servidor.','err');return;}
   const btn=$('#chatForm button[type=submit]');btn.disabled=true;
-  requestAi('chat',{message:t,context:aiContext()}).then(()=>{$('#chatInput').value='';},err=>toast('A IA não recebeu o pedido: '+aiMessage(err),'err')).finally(()=>{btn.disabled=false;});};
+  requestAi('chat',{message:t,context:aiContext(),history:chatHistory()}).then(()=>{$('#chatInput').value='';},err=>toast('A IA não recebeu o pedido: '+aiMessage(err),'err')).finally(()=>{btn.disabled=false;});};
 $('#chatClear').onclick=()=>{if(!connected){toast('Sem conexão com o servidor.','err');return;}
   if(!confirm('Limpar a conversa com o assistente? As propostas ainda não aceitas somem.'))return;
   conn.reducers.clearChat({}).then(()=>{
