@@ -43,6 +43,7 @@ import CompleteJobReducer from "./complete_job_reducer";
 import CreateStoryReducer from "./create_story_reducer";
 import DeleteStoryReducer from "./delete_story_reducer";
 import FailJobReducer from "./fail_job_reducer";
+import JoinByLinkReducer from "./join_by_link_reducer";
 import LockFieldReducer from "./lock_field_reducer";
 import OpenStoryReducer from "./open_story_reducer";
 import PingReducer from "./ping_reducer";
@@ -55,6 +56,7 @@ import RenewFieldLockReducer from "./renew_field_lock_reducer";
 import RequestAiReducer from "./request_ai_reducer";
 import ResetStoryReducer from "./reset_story_reducer";
 import SendDragReducer from "./send_drag_reducer";
+import SetLinkAccessReducer from "./set_link_access_reducer";
 import SetProfileReducer from "./set_profile_reducer";
 import ShareStoryReducer from "./share_story_reducer";
 import UpdateCursorReducer from "./update_cursor_reducer";
@@ -68,6 +70,7 @@ import ChatChunkRow from "./chat_chunk_table";
 import CurAccountRow from "./cur_account_table";
 import CurChoiceRow from "./cur_choice_table";
 import CurInviteRow from "./cur_invite_table";
+import CurLinkRow from "./cur_link_table";
 import CurLocksRow from "./cur_locks_table";
 import CurMemberRow from "./cur_member_table";
 import CurPresenceRow from "./cur_presence_table";
@@ -138,6 +141,13 @@ const tablesSchema = __schema({
     constraints: [
     ],
   }, CurInviteRow),
+  curLink: __table({
+    name: 'cur_link',
+    indexes: [
+    ],
+    constraints: [
+    ],
+  }, CurLinkRow),
   curLocks: __table({
     name: 'cur_locks',
     indexes: [
@@ -256,6 +266,7 @@ const reducersSchema = __reducers(
   __reducerSchema("create_story", CreateStoryReducer),
   __reducerSchema("delete_story", DeleteStoryReducer),
   __reducerSchema("fail_job", FailJobReducer),
+  __reducerSchema("join_by_link", JoinByLinkReducer),
   __reducerSchema("lock_field", LockFieldReducer),
   __reducerSchema("open_story", OpenStoryReducer),
   __reducerSchema("ping", PingReducer),
@@ -268,6 +279,7 @@ const reducersSchema = __reducers(
   __reducerSchema("request_ai", RequestAiReducer),
   __reducerSchema("reset_story", ResetStoryReducer),
   __reducerSchema("send_drag", SendDragReducer),
+  __reducerSchema("set_link_access", SetLinkAccessReducer),
   __reducerSchema("set_profile", SetProfileReducer),
   __reducerSchema("share_story", ShareStoryReducer),
   __reducerSchema("update_cursor", UpdateCursorReducer),
@@ -287,6 +299,8 @@ type __SchemaWithTableAccessorAliases = Omit<typeof tablesSchema.schemaType, "ta
     readonly "cur_choice": Omit<typeof tablesSchema.schemaType.tables["curChoice"], "accessorName"> & { readonly accessorName: "cur_choice" };
     /** @deprecated Use `curInvite` instead. This alias will be removed in the next major version. */
     readonly "cur_invite": Omit<typeof tablesSchema.schemaType.tables["curInvite"], "accessorName"> & { readonly accessorName: "cur_invite" };
+    /** @deprecated Use `curLink` instead. This alias will be removed in the next major version. */
+    readonly "cur_link": Omit<typeof tablesSchema.schemaType.tables["curLink"], "accessorName"> & { readonly accessorName: "cur_link" };
     /** @deprecated Use `curLocks` instead. This alias will be removed in the next major version. */
     readonly "cur_locks": Omit<typeof tablesSchema.schemaType.tables["curLocks"], "accessorName"> & { readonly accessorName: "cur_locks" };
     /** @deprecated Use `curMember` instead. This alias will be removed in the next major version. */
@@ -338,6 +352,7 @@ const tableAccessorAliases = {
   "cur_account": "curAccount",
   "cur_choice": "curChoice",
   "cur_invite": "curInvite",
+  "cur_link": "curLink",
   "cur_locks": "curLocks",
   "cur_member": "curMember",
   "cur_presence": "curPresence",
@@ -379,6 +394,8 @@ export type DbView = __DbViewBase & {
   readonly "cur_choice": __DbViewBase["curChoice"];
   /** @deprecated Use `curInvite` instead. This alias will be removed in the next major version. */
   readonly "cur_invite": __DbViewBase["curInvite"];
+  /** @deprecated Use `curLink` instead. This alias will be removed in the next major version. */
+  readonly "cur_link": __DbViewBase["curLink"];
   /** @deprecated Use `curLocks` instead. This alias will be removed in the next major version. */
   readonly "cur_locks": __DbViewBase["curLocks"];
   /** @deprecated Use `curMember` instead. This alias will be removed in the next major version. */
@@ -419,6 +436,8 @@ export type Tables = __TablesBase & {
   readonly "cur_choice": __TablesBase["curChoice"];
   /** @deprecated Use `curInvite` instead. This alias will be removed in the next major version. */
   readonly "cur_invite": __TablesBase["curInvite"];
+  /** @deprecated Use `curLink` instead. This alias will be removed in the next major version. */
+  readonly "cur_link": __TablesBase["curLink"];
   /** @deprecated Use `curLocks` instead. This alias will be removed in the next major version. */
   readonly "cur_locks": __TablesBase["curLocks"];
   /** @deprecated Use `curMember` instead. This alias will be removed in the next major version. */

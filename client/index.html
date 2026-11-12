@@ -500,6 +500,14 @@ select.inp{padding:0 6px}
 .pinfo{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
 .pinfo b{font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .share-role{width:auto}
+.share-link{display:flex;flex-direction:column;gap:10px;margin-top:4px;padding-top:14px;border-top:1px solid var(--line-2)}
+.share-link h3{margin:0;font-size:13px;font-weight:600}
+.link-box{display:flex;gap:14px;align-items:flex-start}
+.link-box .qr{flex:none;width:132px;height:132px;background:#fff;border-radius:8px;overflow:hidden}
+.link-box .qr svg{display:block;width:100%;height:100%}
+.link-side{flex:1;min-width:0;display:flex;flex-direction:column;gap:8px}
+.link-side .row .inp{flex:1;min-width:0}
+@media (max-width:520px){.link-box{flex-direction:column;align-items:center}.link-side{width:100%}}
 .app.ro #btnAddScene,.app.ro #chatForm{display:none}
 /* askText/askConfirm: o form envolve cabeçalho, corpo e rodapé sem quebrar o flex do .modal */
 .askform{display:contents}

@@ -92,6 +92,9 @@ export type CurChoice = __Infer<typeof CurChoice>;
 export const CurInvite = __t.object("CurInvite", {});
 export type CurInvite = __Infer<typeof CurInvite>;
 
+export const CurLink = __t.object("CurLink", {});
+export type CurLink = __Infer<typeof CurLink>;
+
 export const CurLocks = __t.object("CurLocks", {});
 export type CurLocks = __Infer<typeof CurLocks>;
 
@@ -118,6 +121,13 @@ export const Drags = __t.object("Drags", {
   done: __t.bool(),
 });
 export type Drags = __Infer<typeof Drags>;
+
+export const LinkJoin = __t.object("LinkJoin", {
+  id: __t.u64(),
+  storyId: __t.string(),
+  userId: __t.identity(),
+});
+export type LinkJoin = __Infer<typeof LinkJoin>;
 
 export const Locks = __t.object("Locks", {
   target: __t.string(),
@@ -196,6 +206,14 @@ export const StoryInvite = __t.object("StoryInvite", {
   createdAt: __t.timestamp(),
 });
 export type StoryInvite = __Infer<typeof StoryInvite>;
+
+export const StoryLink = __t.object("StoryLink", {
+  storyId: __t.string(),
+  code: __t.string(),
+  role: __t.string(),
+  createdAt: __t.timestamp(),
+});
+export type StoryLink = __Infer<typeof StoryLink>;
 
 export const StoryMember = __t.object("StoryMember", {
   id: __t.u64(),
