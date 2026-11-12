@@ -188,18 +188,43 @@ O worker de `vn-generation` (Maincloud) roda numa VM e2-micro do Google Cloud (p
 `regal-oasis-512900-b3`, zona `us-east1-b`, `roteiro-worker`). Os arquivos ficam em `worker/deploy/`:
 
 - `setup.sh` prepara uma VM Debian 12 nova (Node 22, usuário `roteiro`, código em `/opt/roteiro/app`).
-- `roteiro-worker.service` roda o worker; os segredos ficam em `/etc/roteiro/worker.env`
-  (`STDB_URI`, `STDB_DB`, `WORKER_SECRET`, `AI_PROVIDER`) e `/etc/roteiro/openai.env`, só root lê.
-- `roteiro-update.timer` roda `update.sh` a cada 5 min: implanta o último commit da main cujo
-  workflow `deploy` passou (módulo já publicado). Nenhuma credencial do Google fica no GitHub.
+- `roteiro-worker.service` roda o worker. Antes de cada início, `openai-key.sh` (como root) busca a
+  chave da OpenAI no Secret Manager para `/run/roteiro/openai.env` (memória).
+- `roteiro-update.timer` roda `update.sh` a cada 5 min: segue a branch `deployed/worker`, que o
+  workflow `deploy` move depois de publicar o módulo, e reinicia o worker se a chave da OpenAI mudou.
+  A VM lê o repositório (privado) por uma chave de deploy só leitura em `/etc/roteiro/deploy_key`.
+
+A VM usa a service account `roteiro-worker@regal-oasis-512900-b3.iam.gserviceaccount.com`, que só
+pode ler o segredo `openai-api-key` e escrever logs/métricas. `gcp-setup.sh` cria essa conta, o
+segredo e as permissões (rodar uma vez, do PC; para a VM por ~1 min ao trocar a conta).
+
+### Onde fica cada segredo
+
+| Segredo | Onde | Para quê |
+|---|---|---|
+| Chave da OpenAI | Secret Manager `openai-api-key` (produção); `worker/.env.openai` (local) | o worker chamar a OpenAI. **Não** vai para o GitHub. |
+| `WORKER_SECRET` | GitHub (Actions) **e** `/etc/roteiro/worker.env` na VM, iguais | senha entre o módulo e o worker (`register_worker`). **Não** é a chave da OpenAI. |
+| `SPACETIMEDB_TOKEN`, `CLOUDFLARE_*` | GitHub (Actions) | publicar o módulo e o site. |
+| Chave de deploy | `/etc/roteiro/deploy_key` na VM (só root) + "Deploy keys" do repositório | a VM ler o repositório. |
+
+**Trocar a chave da OpenAI** (sem SSH; o worker pega a nova em até 5 min). Cole a chave e tecle
+Enter, depois Ctrl+Z e Enter no Windows (Ctrl+D no Linux/macOS):
+
+```bash
+gcloud secrets versions add openai-api-key --data-file=- --project=regal-oasis-512900-b3
+```
+
+Para aplicar na hora: `gcloud compute ssh roteiro-worker --project=regal-oasis-512900-b3 --zone=us-east1-b --tunnel-through-iap --command "sudo systemctl restart roteiro-worker"`.
+Chave recusada aparece no log como `chave da OpenAI recusada (HTTP 401)` e, no chat, como `AI_KEY_INVALID`.
 
 O `WORKER_SECRET` do GitHub (usado ao publicar o módulo) tem que ser o mesmo da VM:
 
 ```bash
-gcloud compute ssh roteiro-worker --project=regal-oasis-512900-b3 --zone=us-east1-b --command "sudo sed -n 's/^WORKER_SECRET=//p' /etc/roteiro/worker.env" | gh secret set WORKER_SECRET --repo Gust4voSSM/spacetime-spike
+gcloud compute ssh roteiro-worker --project=regal-oasis-512900-b3 --zone=us-east1-b --tunnel-through-iap --command "sudo sed -n 's/^WORKER_SECRET=//p' /etc/roteiro/worker.env" | gh secret set WORKER_SECRET --repo Gust4voSSM/spacetime-spike
 ```
 
-Logs: `gcloud compute ssh roteiro-worker --project=regal-oasis-512900-b3 --zone=us-east1-b --command "sudo journalctl -u roteiro-worker -f"`.
+Logs: `gcloud compute ssh roteiro-worker --project=regal-oasis-512900-b3 --zone=us-east1-b --tunnel-through-iap --command "sudo journalctl -u roteiro-worker -f"`.
+(Sem `--tunnel-through-iap` o SSH não passa.)
 
 ## Fora deste spike
 
