@@ -80,6 +80,21 @@ jobs:
           [ -n "$WORKER_SECRET" ] || unset WORKER_SECRET
           spacetime publish -s maincloud -p server --yes=remote,migrate,skip-login,delete-data --delete-data=on-conflict "$STDB_DB"
 
+  # Marca o commit publicado para o worker da VM (worker/deploy/update.sh segue esta branch).
+  # Fica num job à parte para só ele ter permissão de escrita no repositório.
+  worker:
+    needs: module
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Mover deployed/worker
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api -X PATCH "repos/${{ github.repository }}/git/refs/heads/deployed/worker" -f sha="${{ github.sha }}" -F force=true \
+            || gh api -X POST "repos/${{ github.repository }}/git/refs" -f ref=refs/heads/deployed/worker -f sha="${{ github.sha }}"
+
   client:
     needs: module
     # Roda depois do módulo na main, e sozinho nas PRs. PRs de forks não recebem segredos.
