@@ -187,9 +187,24 @@ conn = DbConnection.builder()
         }
         log('fila assinada; aguardando pedidos');
       })
-      .onError((_ctx, err) => console.error('erro na assinatura', err))
+      // Sem a fila assinada o worker não faz nada: sai e deixa o systemd reiniciar.
+      .onError((_ctx, err) => { console.error('erro na assinatura', err); process.exit(1); })
       .subscribe(['SELECT * FROM worker_queue', 'SELECT * FROM worker_story', 'SELECT * FROM worker_scene', 'SELECT * FROM worker_choice']);
   })
-  .onDisconnect(() => log('desconectado; reconectando…'))
-  .onConnectError((_ctx, err) => { console.error('falha ao conectar', err); })
+  .onDisconnect(() => { log('desconectado; reconectando…'); armOffline(); })
+  .onConnectError((_ctx, err) => { console.error('falha ao conectar', err); armOffline(); })
   .build();
+
+// A reconexão automática pode desistir em silêncio (aconteceu num 502 do Maincloud): o processo
+// seguia "active" sem atender pedidos. Se ficar desconectado por OFFLINE_EXIT_MS, sai com erro
+// e o systemd (Restart=always) começa do zero.
+const OFFLINE_EXIT_MS = Number(process.env.OFFLINE_EXIT_MS ?? '120000');
+let offlineTimer: NodeJS.Timeout | undefined;
+function armOffline() {
+  if (offlineTimer) return;
+  offlineTimer = setTimeout(() => {
+    if (conn.isActive) { offlineTimer = undefined; return; }
+    console.error(`desconectado há ${OFFLINE_EXIT_MS / 1000} s; saindo para o systemd reiniciar`);
+    process.exit(1);
+  }, OFFLINE_EXIT_MS);
+}
