@@ -161,7 +161,7 @@ publicação não a exporte. Apenas os scripts do worker o carregam (não versio
 Para usar a OpenAI, troque para `AI_PROVIDER=openai` em `worker/.env`, publique de novo e reinicie o worker.
 Chat, cena sugerida, ação sugerida, completar texto, personagem e background passam a usar a OpenAI.
 O editor pede tudo ao worker; as procedures `suggest_scene` e `complete_text` continuam só com o mock. Opcionais em `worker/.env.openai`:
-`OPENAI_CHAT_MODEL` (padrão `gpt-5-mini`), `OPENAI_REASONING_EFFORT` (padrão `minimal` nos gpt-5),
+`OPENAI_CHAT_MODEL` (padrão `gpt-6-luna`), `OPENAI_REASONING_EFFORT` (padrão `low` nos gpt-5/gpt-6),
 `OPENAI_IMAGE_MODEL` (padrão `gpt-image-1`) e `OPENAI_IMAGE_QUALITY` (padrão `low`). As imagens geradas
 vão para `client/public/generated/` (ou `IMAGE_DIR`); o upload ao R2 fica para o deploy. O `gpt-image-1`
 exige organização verificada na OpenAI.

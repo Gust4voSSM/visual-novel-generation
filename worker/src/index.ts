@@ -10,7 +10,7 @@ const SECRET = process.env.WORKER_SECRET ?? '';
 const FLUSH_MS = Number(process.env.CHUNK_FLUSH_MS ?? '80'); // especificação: 50–100 ms
 // Filas separadas: um personagem com vários sprites não pode atrasar o primeiro pedaço do chat.
 const LANES = { chat: Number(process.env.WORKER_CHAT_PARALLEL ?? '8'), image: Number(process.env.WORKER_IMAGE_PARALLEL ?? '4') };
-const TIMEOUT = { chat: 60_000, text: 30_000, background: 90_000, image: 90_000, character: 180_000 } as const;
+const TIMEOUT = { chat: 180_000, text: 30_000, background: 90_000, image: 90_000, character: 180_000 } as const;
 const TEXT_KINDS = new Set(['chat', 'scene', 'complete', 'option']); // fila de texto; o resto é imagem
 
 const provider = createProvider(process.env.AI_PROVIDER);
@@ -30,7 +30,7 @@ function snapshot(storyId: string): StorySnapshot {
   return {
     title: st?.title ?? '', startScene: st?.startScene ?? '',
     scenes: [...conn.db.workerScene.iter()].filter(s => s.storyId === storyId)
-      .map(s => ({ id: s.id, title: s.title, x: s.x, y: s.y, text: s.text, next: s.next, bg: s.bg })),
+      .map(s => ({ id: s.id, title: s.title, x: s.x, y: s.y, text: s.text, next: s.next, bg: s.bg, chars: s.chars, kind: s.kind, speaker: s.speaker })),
     choices: [...conn.db.workerChoice.iter()].filter(c => c.storyId === storyId)
       .map(c => ({ id: c.id, sceneId: c.sceneId, label: c.label, target: c.target, position: c.position })),
   };
@@ -47,10 +47,24 @@ const shortError = (e: unknown) => {
   return /TIMEOUT/.test(m) ? 'TIMEOUT' : /AI_PROVIDER_ERROR/.test(m) ? 'AI_PROVIDER_ERROR' : m.slice(0, 120);
 };
 
+// Pedaços do raciocínio do modelo e o andamento da proposta vão pela mesma tabela de pedaços, em
+// faixas de seq separadas: assim não muda o esquema do módulo. O cliente separa pelos números.
+const THOUGHT_SEQ = 0x8000_0000; // texto do raciocínio, acumulado
+const PROGRESS_SEQ = 0xC000_0000; // JSON com o andamento da proposta; vale o último
+
 async function runChat(id: string, storyId: string, input: ChatInput) {
-  let seq = 0, buf = '', chain = Promise.resolve();
+  let seq = 0, tseq = 0, pseq = 0, buf = '', tbuf = '', progress = '', sentProgress = '', chain = Promise.resolve();
   // Junta os tokens e envia um pedaço a cada FLUSH_MS, em ordem.
   const flush = () => {
+    if (tbuf) {
+      const text = tbuf, s = THOUGHT_SEQ + tseq++;
+      tbuf = '';
+      chain = chain.then(() => conn.reducers.pushChatChunk({ jobId: id, seq: s, text }));
+    }
+    if (progress !== sentProgress) {
+      const text = sentProgress = progress, s = PROGRESS_SEQ + pseq++;
+      chain = chain.then(() => conn.reducers.pushChatChunk({ jobId: id, seq: s, text }));
+    }
     if (!buf) return;
     const text = buf, s = seq++;
     buf = '';
@@ -58,7 +72,7 @@ async function runChat(id: string, storyId: string, input: ChatInput) {
   };
   const timer = setInterval(flush, FLUSH_MS);
   try {
-    const out = await withTimeout(TIMEOUT.chat, sig => provider!.chat(input, snapshot(storyId), t => { buf += t; }, sig));
+    const out = await withTimeout(TIMEOUT.chat, sig => provider!.chat(input, snapshot(storyId), t => { buf += t; }, sig, t => { tbuf += t; }, p => { progress = JSON.stringify(p); }));
     flush();
     await chain;
     return { result: out, chunks: seq };
@@ -110,7 +124,11 @@ async function handle(id: string) {
     const input = JSON.parse(job.input);
     let result: unknown, extra = '';
     if (job.kind === 'chat') {
-      const r = await runChat(id, job.storyId, { message: String(input.message ?? ''), context: (input.context ?? { characters: [], backgrounds: [] }) as AiContext });
+      const r = await runChat(id, job.storyId, {
+        message: String(input.message ?? ''),
+        context: (input.context ?? { characters: [], backgrounds: [] }) as AiContext,
+        history: Array.isArray(input.history) ? input.history : [],
+      });
       result = r.result;
       extra = `${r.chunks} pedaços`;
     } else if (job.kind === 'character') result = await runCharacter(input);
