@@ -59,6 +59,28 @@ const storyInvite = table(
   }
 );
 
+// "Qualquer pessoa com o link": sem linha, a história é restrita a membros e convites.
+// O código vem do cliente (crypto.getRandomValues): o RNG dos reducers é determinístico.
+const storyLink = table(
+  {},
+  {
+    storyId: t.string().primaryKey(),
+    code: t.string().unique(),
+    role: t.string(), // 'editor' | 'viewer'
+    createdAt: t.timestamp(),
+  }
+);
+
+// Membros que entraram pelo link: perdem o acesso quando o link é desligado ou trocado.
+const linkJoin = table(
+  {},
+  {
+    id: t.u64().primaryKey().autoInc(),
+    storyId: t.string().index('btree'),
+    userId: t.identity().index('btree'),
+  }
+);
+
 // História aberta por cada pessoa; define o que as views cur_* devolvem.
 const activeStory = table(
   {},
@@ -217,7 +239,7 @@ const config = table(
 
 const spacetimedb = schema(
   {
-    account, story, storyMember, storyInvite, activeStory, scene, choice, profile, presence, drags, locks, sweep,
+    account, story, storyMember, storyInvite, storyLink, linkJoin, activeStory, scene, choice, profile, presence, drags, locks, sweep,
     aiJob, chatMessage, chatChunk, aiRate, config,
   },
   {
@@ -504,6 +526,8 @@ export const delete_story = spacetimedb.reducer({ storyId: t.string() }, (ctx, {
   clearGraph(ctx, storyId);
   for (const m of [...ctx.db.storyMember.storyId.filter(storyId)]) ctx.db.storyMember.id.delete(m.id);
   for (const v of [...ctx.db.storyInvite.storyId.filter(storyId)]) ctx.db.storyInvite.id.delete(v.id);
+  for (const j of [...ctx.db.linkJoin.storyId.filter(storyId)]) ctx.db.linkJoin.id.delete(j.id);
+  ctx.db.storyLink.storyId.delete(storyId);
   for (const o of [...ctx.db.activeStory.storyId.filter(storyId)]) ctx.db.activeStory.identity.delete(o.identity);
   for (const p of [...ctx.db.presence.storyId.filter(storyId)]) ctx.db.presence.connectionId.update({ ...p, storyId: '' });
   // Pedidos em andamento somem também: complete_job/fail_job do worker caem em NOT_FOUND.
@@ -514,6 +538,70 @@ export const delete_story = spacetimedb.reducer({ storyId: t.string() }, (ctx, {
 
 // ---------- compartilhamento ----------
 const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
+const LINK_CODE_RE = /^[A-Za-z0-9]{10}$/; // 62^10 ≈ 2^59 combinações
+
+function forgetLinkJoin(ctx: Ctx, storyId: string, userId: Identity) {
+  for (const j of [...ctx.db.linkJoin.userId.filter(userId)]) if (j.storyId === storyId) ctx.db.linkJoin.id.delete(j.id);
+}
+
+function revokeMember(ctx: Ctx, storyId: string, m: MemberRow) {
+  ctx.db.storyMember.id.delete(m.id);
+  forgetLinkJoin(ctx, storyId, m.userId);
+  const o = ctx.db.activeStory.identity.find(m.userId);
+  if (o && o.storyId === storyId) ctx.db.activeStory.identity.delete(m.userId);
+  for (const p of [...ctx.db.presence.identity.filter(m.userId)])
+    if (p.storyId === storyId) ctx.db.presence.connectionId.update({ ...p, storyId: '' });
+}
+
+// Quem entrou pelo link perde o acesso (ou passa a ter o novo papel do link).
+function syncLinkMembers(ctx: Ctx, storyId: string, role: string) {
+  for (const j of [...ctx.db.linkJoin.storyId.filter(storyId)]) {
+    const m = memberOf(ctx.db, storyId, j.userId);
+    if (!m || m.role === 'owner') ctx.db.linkJoin.id.delete(j.id);
+    else if (!role) revokeMember(ctx, storyId, m);
+    else if (m.role !== role) ctx.db.storyMember.id.update({ ...m, role });
+  }
+}
+
+// role '' desliga o link. Um code diferente do atual troca o link: o antigo para de funcionar
+// e quem entrou por ele perde o acesso. Mesmo code só muda o papel.
+export const set_link_access = spacetimedb.reducer(
+  { storyId: t.string(), role: t.string(), code: t.string() },
+  (ctx, { storyId, role, code }) => {
+    requireRole(ctx, storyId, 'owner');
+    const cur = ctx.db.storyLink.storyId.find(storyId);
+    if (!role) {
+      syncLinkMembers(ctx, storyId, '');
+      if (cur) ctx.db.storyLink.storyId.delete(storyId);
+      return;
+    }
+    if (role !== 'editor' && role !== 'viewer') throw new SenderError('INVALID');
+    if (cur && cur.code === code) {
+      if (cur.role !== role) ctx.db.storyLink.storyId.update({ ...cur, role });
+      syncLinkMembers(ctx, storyId, role);
+      return;
+    }
+    if (!LINK_CODE_RE.test(code)) throw new SenderError('INVALID');
+    if (ctx.db.storyLink.code.find(code)) throw new SenderError('CONFLICT'); // o cliente sorteia outro
+    syncLinkMembers(ctx, storyId, '');
+    const row = { storyId, code, role, createdAt: ctx.timestamp };
+    if (cur) ctx.db.storyLink.storyId.update(row);
+    else ctx.db.storyLink.insert(row);
+  }
+);
+
+// Abre a história do link (como open_story); quem ainda não é membro entra com o papel do link.
+// Membros já existentes mantêm o papel que têm. Link desligado ou inexistente: NOT_FOUND.
+export const join_by_link = spacetimedb.reducer({ code: t.string() }, (ctx, { code }) => {
+  requireUser(ctx);
+  const link = LINK_CODE_RE.test(code) ? ctx.db.storyLink.code.find(code) : undefined;
+  if (!link || !ctx.db.story.id.find(link.storyId)) throw new SenderError('NOT_FOUND');
+  if (!memberOf(ctx.db, link.storyId, ctx.sender)) {
+    ctx.db.storyMember.insert({ id: 0n, storyId: link.storyId, userId: ctx.sender, role: link.role });
+    ctx.db.linkJoin.insert({ id: 0n, storyId: link.storyId, userId: ctx.sender });
+  }
+  openFor(ctx, link.storyId);
+});
 
 function addMember(ctx: Ctx, storyId: string, userId: Identity, role: string) {
   const m = memberOf(ctx.db, storyId, userId);
@@ -531,7 +619,10 @@ export const share_story = spacetimedb.reducer(
     const e = email.trim().toLowerCase();
     if (!EMAIL_RE.test(e) || e.length > 200) throw new SenderError('INVALID');
     const acc = [...ctx.db.account.email.filter(e)][0];
-    if (acc) return addMember(ctx, storyId, acc.identity, role);
+    if (acc) {
+      forgetLinkJoin(ctx, storyId, acc.identity); // convidado pelo dono: o acesso não depende mais do link
+      return addMember(ctx, storyId, acc.identity, role);
+    }
     const inv = [...ctx.db.storyInvite.email.filter(e)].find(v => v.storyId === storyId);
     if (inv) ctx.db.storyInvite.id.update({ ...inv, role });
     else ctx.db.storyInvite.insert({ id: 0n, storyId, email: e, role, createdAt: ctx.timestamp });
@@ -544,11 +635,7 @@ export const remove_member = spacetimedb.reducer({ storyId: t.string(), userId: 
   const m = memberOf(ctx.db, storyId, userId);
   if (!m) return;
   if (m.role === 'owner') throw new SenderError('INVALID');
-  ctx.db.storyMember.id.delete(m.id);
-  const o = ctx.db.activeStory.identity.find(userId);
-  if (o && o.storyId === storyId) ctx.db.activeStory.identity.delete(userId);
-  for (const p of [...ctx.db.presence.identity.filter(userId)])
-    if (p.storyId === storyId) ctx.db.presence.connectionId.update({ ...p, storyId: '' });
+  revokeMember(ctx, storyId, m);
 });
 
 export const cancel_invite = spacetimedb.reducer({ id: t.u64() }, (ctx, { id }) => {
@@ -562,12 +649,16 @@ export const cancel_invite = spacetimedb.reducer({ id: t.u64() }, (ctx, { id }) 
 // Uma conta tem uma só história aberta: outra aba que abrir outra história troca para todas.
 export const open_story = spacetimedb.reducer({ storyId: t.string() }, (ctx, { storyId }) => {
   requireRole(ctx, storyId, 'viewer');
+  openFor(ctx, storyId);
+});
+
+function openFor(ctx: Ctx, storyId: string) {
   const row = { identity: ctx.sender, storyId };
   if (ctx.db.activeStory.identity.find(ctx.sender)) ctx.db.activeStory.identity.update(row);
   else ctx.db.activeStory.insert(row);
   const p = ctx.connectionId && ctx.db.presence.connectionId.find(ctx.connectionId);
   if (p && p.storyId !== storyId) ctx.db.presence.connectionId.update({ ...p, storyId, hasCursor: false });
-});
+}
 
 export const close_story = spacetimedb.reducer(ctx => {
   ctx.db.activeStory.identity.delete(ctx.sender);
@@ -632,6 +723,13 @@ export const cur_profile = spacetimedb.view({ public: true }, t.array(profile.ro
 export const cur_invite = spacetimedb.view({ public: true }, t.array(storyInvite.rowType), ctx => {
   const id = curStoryId(ctx);
   return id && hasRole(ctx.db, id, ctx.sender, 'owner') ? [...ctx.db.storyInvite.storyId.filter(id)] : [];
+});
+
+// Link da história aberta: só o dono vê o código (os outros membros já estão dentro).
+export const cur_link = spacetimedb.view({ public: true }, t.array(storyLink.rowType), ctx => {
+  const id = curStoryId(ctx);
+  const l = id && hasRole(ctx.db, id, ctx.sender, 'owner') ? ctx.db.storyLink.storyId.find(id) : undefined;
+  return l ? [l] : [];
 });
 
 // ---------- presença ----------

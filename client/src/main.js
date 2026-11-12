@@ -1,4 +1,5 @@
 import { DbConnection } from './module_bindings';
+import qrcode from 'qrcode-generator';
 /* ---------- art generators (placeholders for uploads / AI output) ---------- */
 const enc=s=>'data:image/svg+xml;charset=utf-8,'+encodeURIComponent(s);
 const norm=s=>(s||'').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'');
@@ -1107,7 +1108,7 @@ async function enterStory(id){$('#gate').hidden=true;$('#home').hidden=true;if(s
   // Tabela de eventos: views não a cobrem, então o filtro vai na assinatura.
   dragSub=conn.subscriptionBuilder().subscribe([`SELECT * FROM drags WHERE story_id = '${id}'`]);
   updateRole();document.title=(conn.db.curStory.id.find(id)?.title||'História')+' · Roteiro VN';onReady();firstTip();}
-/* rotas: /login, /home e /s/<id> (o Pages e o Vite devolvem o index.html para qualquer caminho) */
+/* rotas: /login, /home, /s/<id> e /l/<código do link> (o Pages e o Vite devolvem o index.html para qualquer caminho) */
 const NEXT_KEY='roteiro:next';
 function navigate(path,replace){if(location.pathname!==path)history[replace?'replaceState':'pushState'](null,'',path);route();}
 function route(){const p=location.pathname;
@@ -1115,6 +1116,7 @@ function route(){const p=location.pathname;
   if(!DEV_ANON&&!idToken){if(!authChecked){showLoading();return;}if(p!=='/login'){sessionStorage.setItem(NEXT_KEY,p);history.replaceState(null,'','/login');}showLogin();return;}
   if(p==='/login'||p==='/'){const next=sessionStorage.getItem(NEXT_KEY);sessionStorage.removeItem(NEXT_KEY);history.replaceState(null,'',next&&next!=='/login'&&next!=='/'?next:'/home');return route();}
   if(!conn||!subsReady){showLoading();return;} // a assinatura chama route() de novo
+  const l=p.match(/^\/l\/([A-Za-z0-9]{1,32})$/);if(l)return joinLink(l[1]);
   const m=p.match(/^\/s\/([\w-]{1,64})$/);if(m)enterStory(m[1]);
   else{if(p!=='/home')history.replaceState(null,'','/home');showHome();}}
 addEventListener('popstate',route);
@@ -1123,6 +1125,42 @@ addEventListener('popstate',route);
 // Outra aba da mesma conta abriu outra história: esta reabre a sua quando volta a ter foco.
 function reclaim(){if(storyId&&connected&&ready&&!viewsMine()&&roleIn(storyId))conn.reducers.openStory({storyId}).catch(()=>{});}
 addEventListener('focus',reclaim);document.addEventListener('visibilitychange',()=>{if(!document.hidden)reclaim();});
+
+/* link de compartilhamento: /l/<código> abre a história e dá acesso a quem ainda não tem */
+let joining='';
+async function joinLink(code){if(joining===code)return;joining=code;showLoading();
+  try{await conn.reducers.joinByLink({code});await until(()=>conn.db.curStory.count()>0);
+    const st=[...conn.db.curStory.iter()][0];navigate('/s/'+st.id,true);}
+  catch(err){toast(/NOT_FOUND/.test(errMsg(err))?'Este link não funciona mais. Peça um novo a quem o enviou.':'Não foi possível abrir o link: '+errMsg(err),'err');navigate('/home',true);}
+  finally{joining='';}}
+const LINK_ABC='ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+// 10 caracteres sem viés (rejeita bytes ≥ 248): o servidor só aceita esse formato.
+function linkCode(){let c='';while(c.length<10){for(const b of crypto.getRandomValues(new Uint8Array(16)))if(b<248&&c.length<10)c+=LINK_ABC[b%62];}return c;}
+const linkUrl=code=>location.origin+'/l/'+code;
+function qrSvg(text){const q=qrcode(0,'M');q.addData(text);q.make();return q.createSvgTag({cellSize:4,margin:4,scalable:true});}
+async function setLinkAccess(role,fresh){const cur=conn.db.curLink.storyId.find(storyId);
+  for(let i=0;i<3;i++){const code=role&&(fresh||!cur)?linkCode():cur?cur.code:'';
+    try{await conn.reducers.setLinkAccess({storyId,role,code});return true;}
+    catch(err){if(/CONFLICT/.test(errMsg(err)))continue;toast('Não foi possível mudar o link: '+errMsg(err),'err');return false;}}
+  return false;}
+// Desligar ou trocar o link tira o acesso de quem entrou por ele: pede confirmação antes.
+function confirmLinkCut(title,ok,text){return askConfirm({title,ok,danger:true,text:text+' Quem entrou pelo link sem ter sido convidado perde o acesso.'}).finally(()=>shareModal());}
+function renderLink(){const l=conn.db.curLink.storyId.find(storyId);const v=l?l.role:'';
+  const opt=(val,label)=>`<option value="${val}"${v===val?' selected':''}>${label}</option>`;
+  return`<section class="share-link"><h3>Acesso pelo link</h3>
+    <select class="inp" id="linkRole" aria-label="Quem pode abrir pelo link">${opt('','Restrito: só quem foi convidado')}${opt('viewer','Qualquer pessoa com o link pode ver')}${opt('editor','Qualquer pessoa com o link pode editar')}</select>
+    ${l?`<div class="link-box"><div class="qr" role="img" aria-label="QR code do link">${qrSvg(linkUrl(l.code))}</div>
+      <div class="link-side"><div class="row"><input class="inp" id="linkUrl" readonly value="${esc(linkUrl(l.code))}" aria-label="Link curto"><button class="btn primary" id="linkCopy">Copiar</button></div>
+      <div class="hint">É preciso entrar com uma conta Google para abrir. Quem abrir entra na lista abaixo.</div>
+      <div class="row"><button class="btn sm" id="linkQr">Baixar QR code</button><button class="btn sm danger" id="linkReset">Gerar novo link</button></div></div></div>`:''}</section>`;}
+function wireLink(){const sel=$('#linkRole');if(!sel)return;const l=conn.db.curLink.storyId.find(storyId);
+  sel.onchange=()=>{const role=sel.value;
+    if(!role&&l){sel.value=l.role;confirmLinkCut('Desligar o link','Desligar','O link para de funcionar.').then(yes=>{if(yes)setLinkAccess('');});}
+    else setLinkAccess(role);};
+  const copy=$('#linkCopy');if(copy)copy.onclick=()=>{const u=$('#linkUrl');navigator.clipboard.writeText(u.value).then(()=>toast('Link copiado'),()=>{u.select();toast('Selecione e copie o link (Ctrl+C).');});};
+  const qr=$('#linkQr');if(qr)qr.onclick=()=>{const svg=$('.share-link .qr svg');const a=document.createElement('a');
+    a.href=URL.createObjectURL(new Blob([svg.outerHTML],{type:'image/svg+xml'}));a.download=((conn.db.curStory.id.find(storyId)?.title||'historia').replace(/[^\w\- ]+/g,'').trim()||'historia')+' - QR.svg';a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);};
+  const rs=$('#linkReset');if(rs)rs.onclick=()=>confirmLinkCut('Gerar novo link','Gerar novo link','O link atual para de funcionar.').then(yes=>{if(yes)setLinkAccess(l.role,true);});}
 
 /* compartilhar */
 function shareModal(){if(!storyId)return;modal(`<div class="modal-head"><h2>Compartilhar</h2><button class="iconbtn" data-close aria-label="Fechar">${X}</button></div><div class="modal-body" id="shareBody"></div><div class="modal-foot"><button class="btn" data-close>Fechar</button></div>`,'narrow');renderShare();}
@@ -1135,7 +1173,10 @@ function renderShare(){const host=$('#shareBody');if(!host||!conn)return;const o
       const right=m.role==='owner'?'<span class="meta">dono</span>':owner&&a&&a.email?`${roleSel(m.role,`data-email="${esc(a.email)}"`)}<button class="btn sm danger" data-remove="${hex(m.userId)}">Remover</button>`:`<span class="meta">${ROLE_LABEL[m.role]}</span>`;
       return`<li><span class="pinfo"><b>${esc(who)}${me?' (você)':''}</b><span class="meta">${esc(a&&a.name?a.email:'')}</span></span>${right}</li>`;}).join('')}
     ${[...conn.db.curInvite.iter()].map(v=>`<li><span class="pinfo"><b>${esc(v.email)}</b><span class="meta">convite pendente · ${ROLE_LABEL[v.role]}</span></span><button class="btn sm" data-cancel="${v.id}">Cancelar</button></li>`).join('')}</ul>`
+    +(owner?renderLink():'')
     +(!owner?`<div class="row"><button class="btn sm danger" id="shareLeave">Sair desta história</button></div>`:'');
+  // Não redesenha o seletor do link no meio de uma escolha: renderShare roda a cada mudança de membro.
+  if(owner)wireLink();
   const f=$('#shareForm');if(f)f.onsubmit=e=>{e.preventDefault();const email=$('#shareEmail').value.trim();
     conn.reducers.shareStory({storyId,email,role:$('#shareRole').value}).then(()=>{$('#shareEmail')&&($('#shareEmail').value='');toast('Acesso dado a '+email);},err=>toast(/INVALID/.test(errMsg(err))?'E-mail inválido.':'Não foi possível convidar: '+errMsg(err),'err'));};
   host.querySelectorAll('select[data-email]').forEach(s=>s.onchange=()=>conn.reducers.shareStory({storyId,email:s.dataset.email,role:s.value}).catch(err=>toast('Não foi possível mudar o acesso: '+errMsg(err),'err')));
@@ -1181,7 +1222,7 @@ function connect(){
       const rl=()=>renderNodes();c.db.curLocks.onInsert(rl);c.db.curLocks.onUpdate(rl);c.db.curLocks.onDelete(rl);
       const pp=()=>{renderPeople();syncCursors();};for(const t of[c.db.curPresence,c.db.curProfile]){t.onInsert(pp);t.onUpdate(pp);t.onDelete(pp);}
       c.db.curProfile.onUpdate(()=>renderNodes());
-      const rs=()=>renderShare();for(const t of[c.db.curMember,c.db.curAccount,c.db.curInvite]){t.onInsert(rs);t.onUpdate(rs);t.onDelete(rs);}
+      const rs=()=>renderShare();for(const t of[c.db.curMember,c.db.curAccount,c.db.curInvite,c.db.curLink]){t.onInsert(rs);t.onUpdate(rs);t.onDelete(rs);}
       const rh=()=>renderHome();for(const t of[c.db.myStories,c.db.myAccount]){t.onInsert(rh);t.onUpdate(rh);t.onDelete(rh);}
       // Papel novo ou acesso removido (inclusive história excluída) na história aberta.
       const mm=()=>{renderHome();if(!storyId)return;if(!roleIn(storyId)){toast('Você não tem mais acesso a esta história.','err');navigate('/home');return;}updateRole();renderShare();};
@@ -1193,7 +1234,7 @@ function connect(){
       c.subscriptionBuilder().onApplied(()=>{subsReady=true;route();}).onError((_ctx,err)=>toast('Erro na assinatura: '+errMsg(err),'err')).subscribe([
         'SELECT * FROM my_account','SELECT * FROM my_stories','SELECT * FROM my_memberships',
         'SELECT * FROM cur_story','SELECT * FROM cur_scene','SELECT * FROM cur_choice','SELECT * FROM cur_presence','SELECT * FROM cur_locks',
-        'SELECT * FROM cur_member','SELECT * FROM cur_account','SELECT * FROM cur_profile','SELECT * FROM cur_invite',
+        'SELECT * FROM cur_member','SELECT * FROM cur_account','SELECT * FROM cur_profile','SELECT * FROM cur_invite','SELECT * FROM cur_link',
         'SELECT * FROM my_ai_job','SELECT * FROM my_chat_message','SELECT * FROM chat_chunk WHERE requester = :sender']);})
     // A presença nova volta para a história aberta (on_connect lê active_story); a assinatura é refeita pelo SDK.
     .onAutomaticReconnect((c,identity,token)=>{if(DEV_ANON)sessionStorage.setItem(TOKEN_KEY,token);myId=identity;myConn=c.connectionId;connected=true;netState='on';renderNet();curLock=null;reclaim();scheduleRebuild();scheduleSync();})

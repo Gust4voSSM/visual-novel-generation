@@ -9,6 +9,7 @@
     "dev:api": "wrangler pages dev dist --port 8788 --compatibility-date=2026-10-01"
   },
   "dependencies": {
+    "qrcode-generator": "^1.4.4",
     "spacetimedb": "^2.13.0"
   },
   "devDependencies": {
