@@ -41,6 +41,7 @@ install -d -m 0700 /etc/roteiro
 for f in worker.env openai.env; do [ -f /etc/roteiro/$f ] || install -m 0600 /dev/null /etc/roteiro/$f; done
 
 install -m 0755 update.sh /opt/roteiro/update.sh
+install -m 0755 openai-key.sh /opt/roteiro/openai-key.sh
 install -m 0644 roteiro-worker.service roteiro-update.service roteiro-update.timer /etc/systemd/system/
 systemctl daemon-reload
 systemctl enable roteiro-worker roteiro-update.timer

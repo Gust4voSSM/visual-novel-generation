@@ -8,6 +8,13 @@
 # espelho. Um worker comprometido não consegue ler a chave.
 set -eu
 
+# Chave da OpenAI trocada no Secret Manager (gcloud secrets versions add): reinicia para o
+# openai-key.sh buscar a versão nova. Trocar a chave não precisa de SSH.
+if /opt/roteiro/openai-key.sh --changed; then
+  echo "chave da OpenAI nova no Secret Manager; reiniciando o worker"
+  systemctl restart roteiro-worker
+fi
+
 REPO=git@github.com:Gust4voSSM/spacetime-spike.git
 APP=/opt/roteiro/app
 MIRROR=/var/lib/roteiro/repo.git

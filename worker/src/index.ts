@@ -18,6 +18,12 @@ const store = createStore();
 const log = (...a: unknown[]) => console.log(new Date().toISOString().slice(11, 23), ...a);
 
 if (!SECRET) { console.error('WORKER_SECRET ausente (veja worker/.env).'); process.exit(1); }
+try {
+  await provider?.verify?.();
+} catch {
+  console.error('chave da OpenAI recusada (HTTP 401). Em produção: gcloud secrets versions add openai-api-key (veja o README).');
+  process.exit(1);
+}
 
 let conn: DbConnection;
 const seen = new Set<string>(); // pedidos já tratados por este processo
@@ -44,7 +50,7 @@ function withTimeout<T>(ms: number, run: (signal: AbortSignal) => Promise<T>): P
 
 const shortError = (e: unknown) => {
   const m = String((e as Error)?.message ?? e);
-  return /TIMEOUT/.test(m) ? 'TIMEOUT' : /AI_PROVIDER_ERROR/.test(m) ? 'AI_PROVIDER_ERROR' : m.slice(0, 120);
+  return /TIMEOUT/.test(m) ? 'TIMEOUT' : /AI_KEY_INVALID/.test(m) ? 'AI_KEY_INVALID' : /AI_PROVIDER_ERROR/.test(m) ? 'AI_PROVIDER_ERROR' : m.slice(0, 120);
 };
 
 // Pedaços do raciocínio do modelo e o andamento da proposta vão pela mesma tabela de pedaços, em

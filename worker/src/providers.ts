@@ -44,6 +44,8 @@ export type OptionInput = { sceneId: string; choiceId: string; context: AiContex
 
 export interface AiProvider {
   readonly name: string;
+  /** Confere credenciais antes de assumir pedidos; lança AI_KEY_INVALID se forem recusadas. */
+  verify?(): Promise<void>;
   /** Resposta do chat em streaming: chama onText a cada pedaço, devolve a mensagem final e as propostas. */
   chat(
     input: ChatInput, story: StorySnapshot, onText: (t: string) => void, signal: AbortSignal,
@@ -390,9 +392,24 @@ class OpenAiProvider implements AiProvider {
     if (!res.ok) {
       const body = await res.text().catch(() => '');
       console.error(`openai ${path}: HTTP ${res.status}`, clip(body, 400));
+      if (res.status === 401) throw new Error('AI_KEY_INVALID');
       throw Object.assign(new Error('AI_PROVIDER_ERROR'), { status: res.status, body });
     }
     return res;
+  }
+
+  // Confere a chave antes de assumir pedidos (GET /models não gasta tokens). Chave recusada derruba
+  // o worker com uma mensagem clara, em vez de cada pedido falhar com um erro genérico.
+  async verify(): Promise<void> {
+    let res: Response;
+    try {
+      res = await fetch(OPENAI_URL + '/models', { headers: { Authorization: `Bearer ${this.key}` }, signal: AbortSignal.timeout(15_000) });
+    } catch (e) {
+      console.warn('openai: não deu para conferir a chave agora (rede); seguindo', String(e).slice(0, 120));
+      return;
+    }
+    if (res.status === 401) throw new Error('AI_KEY_INVALID');
+    if (!res.ok) console.warn(`openai: conferência da chave respondeu HTTP ${res.status}; seguindo`);
   }
 
   // Uma ida ao modelo pela API Responses, em streaming. onText recebe o texto livre ou, sem ele, o
