@@ -194,6 +194,10 @@ select.inp{padding:0 6px}
 .pchar.sel{filter:drop-shadow(0 0 1px #fff) drop-shadow(0 0 5px var(--amber))}
 .pchar.dim.sel{filter:brightness(.8) drop-shadow(0 0 1px #fff) drop-shadow(0 0 5px var(--amber))}
 .pchar.hold{visibility:hidden}
+/* onion skin: o personagem arrastado nas cenas vizinhas (âmbar = anterior, azul = seguinte) */
+.onion{position:absolute;bottom:0;height:96%;transform:translateX(-50%);object-fit:contain;object-position:bottom;pointer-events:none;opacity:.32;filter:grayscale(1) brightness(1.4) drop-shadow(0 0 0 var(--oc)) drop-shadow(0 0 2px var(--oc));transition:opacity .15s,filter .15s;--oc:var(--amber)}
+.onion.next{--oc:#6aa8ff}.onion.both{--oc:#c9a8ff}
+.onion.hit{opacity:.6;filter:grayscale(1) brightness(1.6) drop-shadow(0 0 1px #fff) drop-shadow(0 0 6px var(--oc))}
 .pchar.clash{filter:drop-shadow(0 0 1px #fff) drop-shadow(0 0 6px var(--red));animation:clash .5s ease-in-out infinite alternate}
 @keyframes clash{to{filter:drop-shadow(0 0 1px #fff) drop-shadow(0 0 12px var(--red))}}
 .stage-mini.drop-ok::after,.stage-mini.drop-bad::after{content:"";position:absolute;inset:0;border-radius:inherit;pointer-events:none;z-index:2}

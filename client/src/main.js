@@ -346,7 +346,8 @@ function createScene(src,ch,at,ai,opts={}){const sp=outPos(src.id,ch)||{x:src.x+
   fresh.set(ns.id,{t0:performance.now(),cls:ai?'pop-ai':'pop'});
   if(click)tweens.set(key,{fx:sp.x,fy:sp.y,t0:performance.now(),ai:false,noland:true,to:ns.id});
   burst(click?ns.x:p.x,click?ns.y+20:p.y,ai?'ai':'plain');
-  if(!ai)expanded=ns.id;
+  // sem IA, a cena nova continua a anterior: mesmo background e o elenco nas mesmas posições
+  if(!ai){expanded=ns.id;ns.bg=src.bg||null;ns.chars=src.chars.map((cc,i)=>{const p=posOf(src,i);return{c:cc.c,s:cc.s,x:p.x,y:p.y};});}
   if(ai){ns.ai=true;ns.title='Gerando…';gens.set(ns.id,{full:'',i:0,comp:null,key,labelCh:opts.labelCh||null});lit.add(key);shake();}
   refresh();ensureVisible(ns.id);if(ai)runSuggest(ns.id,src.id,ch);return ns;}
 // A cena já existe para todos com ai = 'generating'; o worker só devolve o conteúdo.
@@ -628,7 +629,7 @@ function startCharDrag(e,src,img,from){e.preventDefault();
     ax:from.ax,ay:from.ay,h:from.h,clip:from.clip,free:from.free,moved:false,end:false,over:null,ok:false,why:''};
   addEventListener('pointermove',onCharMove);addEventListener('pointerup',onCharUp);addEventListener('pointercancel',onCharCancel);}
 function offChar(){removeEventListener('pointermove',onCharMove);removeEventListener('pointerup',onCharUp);removeEventListener('pointercancel',onCharCancel);document.body.classList.remove('chardrag');
-  nodesEl.querySelectorAll('.drop-ok,.drop-bad').forEach(x=>x.classList.remove('drop-ok','drop-bad'));nodesEl.querySelectorAll('.pchar.clash').forEach(x=>x.classList.remove('clash'));}
+  nodesEl.querySelectorAll('.drop-ok,.drop-bad').forEach(x=>x.classList.remove('drop-ok','drop-bad'));nodesEl.querySelectorAll('.stage-mini[data-onion]').forEach(clearOnion);nodesEl.querySelectorAll('.pchar.clash').forEach(x=>x.classList.remove('clash'));}
 function paintGhost(d,clipTo,p){const g=d.g,ar=g.naturalWidth?g.naturalWidth/g.naturalHeight:2/3,w=d.h*ar,L=d.ax-w/2,T=d.ay-d.h;
   g.style.height=d.h+'px';g.style.transform=`translate(${(L).toFixed(1)}px,${T.toFixed(1)}px)`;
   if(clipTo&&p>0){const it=Math.max(0,clipTo.top-T)*p,ir=Math.max(0,L+w-clipTo.right)*p,ib=Math.max(0,T+d.h-clipTo.bottom)*p,il=Math.max(0,clipTo.left-L)*p;g.style.clipPath=`inset(${it}px ${ir}px ${ib}px ${il}px round ${(7*view.z*p).toFixed(1)}px)`;}
@@ -636,17 +637,39 @@ function paintGhost(d,clipTo,p){const g=d.g,ar=g.naturalWidth?g.naturalWidth/g.n
 function hoverStage(){const d=cdrag;const hit=document.elementFromPoint(d.px,d.py);const st=hit&&hit.closest('.stage-mini[data-stage]');const sid=st?st.dataset.stage:null;
   nodesEl.querySelectorAll('.drop-ok,.drop-bad').forEach(x=>{if(x!==st)x.classList.remove('drop-ok','drop-bad');});
   nodesEl.querySelectorAll('.pchar.clash').forEach(x=>{if(!st||!st.contains(x))x.classList.remove('clash');});
+  nodesEl.querySelectorAll('.stage-mini[data-onion]').forEach(x=>{if(x!==st||!d.ok&&x.dataset.onion)clearOnion(x);});
   d.over=sid;d.ok=false;d.why='';if(!st)return;
   const s=scene(sid),same=sid===d.src.sid;
   if(!same&&s.chars.some(x=>x.c===d.src.c)){d.why='dup';st.querySelector(`.pchar[data-c="${d.src.c}"]`)?.classList.add('clash');}
   else if(!same&&s.chars.length>=MAXCH)d.why='full';else d.ok=true;
-  st.classList.toggle('drop-ok',d.ok);st.classList.toggle('drop-bad',!d.ok);}
+  st.classList.toggle('drop-ok',d.ok);st.classList.toggle('drop-bad',!d.ok);
+  if(d.ok&&st.dataset.onion!==d.src.c)paintOnion(st,sid,d.src.c);else if(!d.ok)clearOnion(st);}
+/* Onion skin: onde o personagem arrastado está na cena anterior e na seguinte, para manter a posição entre cenas. */
+function neighbors(sid){const s=scene(sid);const prev=state.scenes.filter(o=>o.id!==sid&&(o.next===sid||o.choices.some(c=>c.target===sid)));
+  const next=s?[...new Set([s.next,...s.choices.map(c=>c.target)].filter(Boolean))].map(scene).filter(Boolean):[];return{prev,next};}
+function onionOf(sid,c){const out=[];const{prev,next}=neighbors(sid);
+  for(const[dir,list]of[['prev',prev],['next',next]])for(const o of list){const i=o.chars.findIndex(x=>x.c===c);if(i<0)continue;const sp=spriteOf(charById(c),o.chars[i].s);if(!sp)continue;
+    const p=posOf(o,i);if(out.some(q=>Math.abs(q.x-p.x)<.5&&Math.abs(q.y-p.y)<.5)){const q=out.find(q=>Math.abs(q.x-p.x)<.5&&Math.abs(q.y-p.y)<.5);if(q.dir!==dir)q.dir='both';q.titles.push(o.title);continue;}
+    out.push({x:p.x,y:p.y,img:sp.img,dir,titles:[o.title]});}
+  return out;}
+function paintOnion(st,sid,c){clearOnion(st);const fr=st.querySelector('.stage-frame');if(!fr)return;st.dataset.onion=c;
+  for(const o of onionOf(sid,c)){const el=document.createElement('img');el.className='onion '+o.dir;el.src=o.img;el.alt='';el.draggable=false;el.dataset.x=o.x;el.dataset.y=o.y;
+    el.style.left=o.x+'%';el.style.bottom=-o.y+'%';el.title=(o.dir==='next'?'na cena seguinte: ':o.dir==='prev'?'na cena anterior: ':'nas cenas vizinhas: ')+o.titles.join(', ');fr.prepend(el);}}
+function clearOnion(st){delete st.dataset.onion;st.querySelectorAll('.onion').forEach(x=>x.remove());}
+// Atrai para a posição de uma cena vizinha quando perto (Alt solta o ímã).
+const SNAP_X=4,SNAP_Y=6;
+function rawPos(d,r,h){const ax=d.px+d.ox*h,ay=d.py+d.oy*h;return{x:(ax-r.left)/r.width*100,y:(ay-r.bottom)/r.height*100};}
+function snapOnion(d,st,p){let best=null,bd=1e9;st.querySelectorAll('.onion').forEach(o=>{o.classList.remove('hit');if(d.alt)return;const dx=Math.abs(+o.dataset.x-p.x),dy=Math.abs(+o.dataset.y-p.y);
+    if(dx<=SNAP_X&&dy<=SNAP_Y&&dx+dy<bd){bd=dx+dy;best=o;}});
+  if(!best)return null;best.classList.add('hit');return{x:+best.dataset.x,y:+best.dataset.y};}
 function charLoop(){const d=cdrag;if(!d||d.end)return;hoverStage();
   const th=d.over&&d.ok?frameRect(stageEl(d.over)).height*SPRITE_H:d.free;d.h+=(th-d.h)*.28;
-  d.ax=d.px+d.ox*d.h;d.ay=d.py+d.oy*d.h;
+  d.ax=d.px+d.ox*d.h;d.ay=d.py+d.oy*d.h;d.snap=null;
+  const ost=d.over&&d.ok&&stageEl(d.over);if(ost){const r=frameRect(ost),sn=snapOnion(d,ost,rawPos(d,r,r.height*SPRITE_H));
+    if(sn){d.snap=sn;const tx=r.left+sn.x/100*r.width,ty=r.bottom+sn.y/100*r.height;d.sax=(d.sax??d.ax)+(tx-(d.sax??d.ax))*.45;d.say=(d.say??d.ay)+(ty-(d.say??d.ay))*.45;d.ax=d.sax;d.ay=d.say;}else d.sax=d.say=null;}
   if(d.clip>0)d.clip=Math.max(0,d.clip-.09);const src=d.clip>0&&d.src.sid&&stageEl(d.src.sid);
   paintGhost(d,src&&src.getBoundingClientRect(),easeInOut(d.clip));requestAnimationFrame(charLoop);}
-function onCharMove(e){const d=cdrag;if(!d||e.pointerId!==d.pid)return;d.px=e.clientX;d.py=e.clientY;
+function onCharMove(e){const d=cdrag;if(!d||e.pointerId!==d.pid)return;d.px=e.clientX;d.py=e.clientY;d.alt=e.altKey;
   if(!d.moved){if(Math.hypot(d.px-d.sx,d.py-d.sy)<(d.touch?8:4))return;d.moved=true;document.body.classList.add('chardrag');
     if(d.src.sid)renderNodes();else if(mqNarrow.matches)setPanel('rail',false);
     paintGhost(d,d.src.sid&&stageEl(d.src.sid)?.getBoundingClientRect(),1);d.g.style.visibility='';requestAnimationFrame(charLoop);}
@@ -676,7 +699,7 @@ function onCharUp(e){const d=cdrag;if(!d||e.pointerId!==d.pid)return;d.px=e.clie
 function onCharCancel(e){const d=cdrag;if(!d||e.pointerId!==d.pid)return;offChar();d.end=true;if(d.moved&&d.src.sid){flyBack(d);return;}cdrag=null;d.g.remove();renderNodes();}
 function dropChar(d){const s=scene(d.over);if(!s){cdrag=null;fadeGhost(d);renderNodes();return;}
   const r=frameRect(stageEl(s.id)),th=r.height*SPRITE_H,ax=d.px+d.ox*th,ay=d.py+d.oy*th;
-  const pos={x:+Math.max(2,Math.min(98,(ax-r.left)/r.width*100)).toFixed(1),y:+Math.max(0,Math.min(POS_Y_MAX,(ay-r.bottom)/r.height*100)).toFixed(1)};
+  const pos=d.snap&&!d.alt?{...d.snap}:{x:+Math.max(2,Math.min(98,(ax-r.left)/r.width*100)).toFixed(1),y:+Math.max(0,Math.min(POS_Y_MAX,(ay-r.bottom)/r.height*100)).toFixed(1)};
   pushUndo();materialize(s);let cc=s.chars.find(x=>x.c===d.src.c);
   if(d.src.sid&&d.src.sid!==s.id){const o=scene(d.src.sid);if(o){const old=o.chars.find(x=>x.c===d.src.c);materialize(o);o.chars=o.chars.filter(x=>x!==old);fixSpeaker(o);}}
   if(cc)s.chars=s.chars.filter(x=>x!==cc);else{cc={c:d.src.c,s:d.src.s};freshRows.set('cast:'+s.id+':'+cc.c,performance.now());}
