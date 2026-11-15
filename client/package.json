@@ -6,9 +6,12 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "dev:api": "wrangler pages dev dist --port 8788 --compatibility-date=2026-10-01"
+    "dev:api": "wrangler pages dev dist --port 8788 --compatibility-date=2026-10-01 --kv IMAGES",
+    "dev:api:anon": "wrangler pages dev dist --port 8788 --compatibility-date=2026-10-01 --kv IMAGES --binding UPLOAD_DEV_ANON=1",
+    "example-art": "node scripts/example-art.mjs"
   },
   "dependencies": {
+    "qrcode-generator": "^1.4.4",
     "spacetimedb": "^2.13.0"
   },
   "devDependencies": {

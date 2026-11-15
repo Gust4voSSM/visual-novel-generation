@@ -10,7 +10,14 @@ User=roteiro
 Group=roteiro
 WorkingDirectory=/opt/roteiro/app/worker
 EnvironmentFile=/etc/roteiro/worker.env
+# Chave da OpenAI: vem do Secret Manager para /run/roteiro (memória, apagada quando o serviço
+# para) pelo openai-key.sh, que roda como root (+) antes de cada início. O arquivo em /etc é só
+# reserva para quando o segredo não existir; o de /run, lido depois, tem prioridade.
 EnvironmentFile=-/etc/roteiro/openai.env
+EnvironmentFile=-/run/roteiro/openai.env
+RuntimeDirectory=roteiro
+RuntimeDirectoryMode=0700
+ExecStartPre=+/opt/roteiro/openai-key.sh
 ExecStart=/opt/roteiro/app/worker/node_modules/.bin/tsx src/index.ts
 Restart=always
 RestartSec=5
