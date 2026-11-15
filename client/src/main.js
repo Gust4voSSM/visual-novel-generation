@@ -128,7 +128,7 @@ const reveal=new Map;         // sceneId -> t0
 const selected=new Set;
 let expanded=null,animUntil=0;
 const castSel=new Map;          // sceneId -> personagem escolhido na barra de sprites
-let cdrag=null,landing=null;    // personagem sendo arrastado / pousando no palco (o original fica oculto)
+let cdrag=null,landing=null;const remoteChars=new Map; // conexão -> personagem que outra pessoa arrasta    // personagem sendo arrastado / pousando no palco (o original fica oculto)
 const remoteDrag=new Map;       // sceneId -> {x,y,tx,ty,color,name,conn,seen,done}: nós que outra pessoa arrasta
 const pushOff=new Map;const dispY=s=>{const r=remoteDrag.get(s.id);return r?r.y:s.y+(pushOff.get(s.id)||0);};
 const dispX=s=>{const r=remoteDrag.get(s.id);return r?r.x:s.x;};
@@ -155,7 +155,7 @@ function ago(t0){return Math.round(performance.now()-t0);}
 /* ---------- node rendering ---------- */
 const REMOTE_GEN={full:'',i:0};
 const genOf=s=>gens.get(s.id)||(s.aiStatus==='generating'?REMOTE_GEN:null);
-function hiddenChar(sid,c){return!!(cdrag&&cdrag.moved&&cdrag.src.sid===sid&&cdrag.src.c===c||landing&&landing.sid===sid&&landing.c===c);}
+function hiddenChar(sid,c){for(const g of remoteChars.values())if(!g.done&&g.p.sid===sid&&g.p.c===c)return true;return!!(cdrag&&cdrag.moved&&cdrag.src.sid===sid&&cdrag.src.c===c||landing&&landing.sid===sid&&landing.c===c);}
 function castSelOf(s){const v=castSel.get(s.id);if(v&&s.chars.some(x=>x.c===v))return v;if(s.kind==='dialogue'&&s.speaker)return s.speaker;return s.chars.length?s.chars[s.chars.length-1].c:null;}
 function stageMini(s){const bg=bgById(s.bg);const g=genOf(s);
   if(g)return`<div class="stage-mini"><div class="gen-veil"><span class="skel" style="width:72%"></span><span class="skel" style="width:54%"></span><span class="skel" style="width:63%"></span></div></div>`;
@@ -647,12 +647,12 @@ function charLoop(){const d=cdrag;if(!d||d.end)return;hoverStage();
   const ost=d.over&&d.ok&&stageEl(d.over);if(ost){const r=frameRect(ost),sn=snapOnion(d,ost,rawPos(d,r,r.height*SPRITE_H));
     if(sn){d.snap=sn;const tx=r.left+sn.x/100*r.width,ty=r.bottom+sn.y/100*r.height;d.sax=(d.sax??d.ax)+(tx-(d.sax??d.ax))*.45;d.say=(d.say??d.ay)+(ty-(d.say??d.ay))*.45;d.ax=d.sax;d.ay=d.say;}else d.sax=d.say=null;}
   if(d.clip>0)d.clip=Math.max(0,d.clip-.09);const src=d.clip>0&&d.src.sid&&stageEl(d.src.sid);
-  paintGhost(d,src&&src.getBoundingClientRect(),easeInOut(d.clip));requestAnimationFrame(charLoop);}
+  paintGhost(d,src&&src.getBoundingClientRect(),easeInOut(d.clip));sendCharDrag(d,false);requestAnimationFrame(charLoop);}
 function onCharMove(e){const d=cdrag;if(!d||e.pointerId!==d.pid)return;d.px=e.clientX;d.py=e.clientY;d.alt=e.altKey;
   if(!d.moved){if(Math.hypot(d.px-d.sx,d.py-d.sy)<(d.touch?8:4))return;d.moved=true;document.body.classList.add('chardrag');
     if(d.src.sid)renderNodes();else if(mqNarrow.matches)setPanel('rail',false);
     paintGhost(d,d.src.sid&&stageEl(d.src.sid)?.getBoundingClientRect(),1);d.g.style.visibility='';requestAnimationFrame(charLoop);}
-  hoverStage();}
+  hoverStage();sendCharDrag(d,false);}
 // Pousa o fantasma em pos (% do quadro) do palco sid, fechando o recorte; o sprite real só aparece no fim.
 function landGhost(d,sid,pos,done){const a0={ax:d.ax,ay:d.ay,h:d.h},t0=performance.now(),D=reduced?1:300;const me={sid,c:d.src.c};landing=me;let fin=false;
   // sem rAF (aba em segundo plano) o pouso termina pelo relógio, para o sprite real não ficar oculto
@@ -668,7 +668,7 @@ function flyBack(d){cdrag=null;const s=scene(d.src.sid),i=s?s.chars.findIndex(x=
   landGhost(d,s.id,posOf(s,i),renderNodes);}
 function onCharUp(e){const d=cdrag;if(!d||e.pointerId!==d.pid)return;d.px=e.clientX;d.py=e.clientY;d.alt=e.altKey;if(d.moved)hoverStage();
   // o ímã é decidido aqui também: sem rAF (aba em segundo plano) o loop não roda
-  const ust=d.moved&&d.over&&d.ok&&stageEl(d.over);if(ust){const r=frameRect(ust);d.snap=snapOnion(d,ust,rawPos(d,r,r.height*SPRITE_H));}offChar();
+  const ust=d.moved&&d.over&&d.ok&&stageEl(d.over);if(ust){const r=frameRect(ust);d.snap=snapOnion(d,ust,rawPos(d,r,r.height*SPRITE_H));}if(d.moved)sendCharDrag(d,true);offChar();
   if(!d.moved){d.g.remove();cdrag=null;if(d.src.sid){castSel.set(d.src.sid,d.src.c);expanded===d.src.sid?renderNodes():setExpanded(d.src.sid);}return;}
   d.end=true;if(!d.src.sid){railSuppress=true;setTimeout(()=>railSuppress=false,0);}
   if(d.over&&d.ok){dropChar(d);return;}
@@ -677,7 +677,7 @@ function onCharUp(e){const d=cdrag;if(!d||e.pointerId!==d.pid)return;d.px=e.clie
   if(d.over){flyBack(d);return;}
   // de um palco para fora de qualquer palco: sai da cena
   const s=scene(d.src.sid);cdrag=null;if(s&&s.chars.some(x=>x.c===d.src.c)){pushUndo();materialize(s);s.chars=s.chars.filter(x=>x.c!==d.src.c);fixSpeaker(s);refresh();}else renderNodes();fadeGhost(d,true);}
-function onCharCancel(e){const d=cdrag;if(!d||e.pointerId!==d.pid)return;offChar();d.end=true;if(d.moved&&d.src.sid){flyBack(d);return;}cdrag=null;d.g.remove();renderNodes();}
+function onCharCancel(e){const d=cdrag;if(!d||e.pointerId!==d.pid)return;if(d.moved)sendCharDrag(d,true,true);offChar();d.end=true;if(d.moved&&d.src.sid){flyBack(d);return;}cdrag=null;d.g.remove();renderNodes();}
 function dropChar(d){const s=scene(d.over);if(!s){cdrag=null;fadeGhost(d);renderNodes();return;}
   const r=frameRect(stageEl(s.id)),th=r.height*SPRITE_H,ax=d.px+d.ox*th,ay=d.py+d.oy*th;
   const pos=d.snap&&!d.alt?{...d.snap}:{x:+Math.max(2,Math.min(98,(ax-r.left)/r.width*100)).toFixed(1),y:+Math.max(0,Math.min(POS_Y_MAX,(ay-r.bottom)/r.height*100)).toFixed(1)};
@@ -1134,7 +1134,38 @@ function lockBadge(p){return`<div class="lockbadge" style="--lc:${p.color}" role
 let lastDrag=0;
 function sendDrag(orig,done){if(!connected)return;const now=performance.now();if(!done&&now-lastDrag<50)return;lastDrag=now;
   conn.reducers.sendDrag({moves:JSON.stringify(orig.map(o=>[o.s.id,o.s.x,o.s.y])),done}).catch(()=>{});}
+/* Personagem sendo arrastado: vai na mesma tabela drags, como ['@char', json, 0] (clientes antigos
+   não acham a cena '@char' e ignoram). Sobre um palco, a posição vai em % do quadro; fora, em
+   coordenadas do mundo, para cada um ver no lugar certo com o seu zoom e a sua câmera. */
+let lastCharSend=0,lastCharMsg='';
+function sendCharDrag(d,done,cancel){if(!connected)return;const now=performance.now();if(!done&&now-lastCharSend<50)return;
+  const st=d.over&&d.ok&&stageEl(d.over);let pos=null;
+  if(st){const r=frameRect(st),q=d.snap&&!d.alt?d.snap:rawPos(d,r,r.height*SPRITE_H);pos={x:+Math.max(2,Math.min(98,q.x)).toFixed(1),y:+Math.max(0,Math.min(POS_Y_MAX,q.y)).toFixed(1)};}
+  const w=toWorld(d.px+d.ox*d.h,d.py+d.oy*d.h); // do ponteiro: d.ax/ay só andam com o rAF
+  const p={c:d.src.c,s:d.src.s,sid:d.src.sid||'',over:pos?d.over:'',x:pos?pos.x:0,y:pos?pos.y:0,wx:Math.round(w.x),wy:Math.round(w.y),wh:Math.round(d.h/view.z),drop:done&&!cancel&&!!pos};
+  const msg=JSON.stringify([['@char',JSON.stringify(p),0]]);
+  // parado: só um sinal de vida por segundo (o outro lado solta o fantasma após 2,5 s sem notícia)
+  if(!done&&msg===lastCharMsg&&now-lastCharSend<1000)return;lastCharSend=now;lastCharMsg=msg;
+  conn.reducers.sendDrag({moves:msg,done}).catch(()=>{});}
+function onRemoteChar(row,raw,prof,now){let p;try{p=JSON.parse(raw);}catch(_){return;}const c=charById(p.c),sp=c&&spriteOf(c,p.s);if(!sp||!sp.img)return;
+  const key=row.connectionId.toHexString();let g=remoteChars.get(key);
+  if(!g){const el=document.createElement('div');el.className='rghost';el.style.setProperty('--rc',prof.color);el.innerHTML=`<img alt="" draggable="false"><span></span>`;document.body.appendChild(el);
+    g={el,img:el.querySelector('img'),x:null,y:null,h:null,p};remoteChars.set(key,g);if(p.sid)renderNodes();}
+  if(g.img.getAttribute('src')!==sp.img)g.img.src=sp.img;g.el.querySelector('span').textContent=prof.name;
+  const wasDone=g.done;g.p=p;g.seen=now;g.done=row.done;if(row.done&&!wasDone){g.doneAt=now;if(p.sid)renderNodes();}}
+// Alvo em pixels de tela, recalculado a cada quadro (o palco pode mudar com zoom, pan ou re-render).
+function remoteCharTarget(p){const st=p.over&&stageEl(p.over);if(st){const r=frameRect(st);return{x:r.left+p.x/100*r.width,y:r.bottom+p.y/100*r.height,h:r.height*SPRITE_H};}
+  const cr=canvas.getBoundingClientRect();return{x:cr.left+view.x+p.wx*view.z,y:cr.top+view.y+p.wy*view.z,h:p.wh*view.z};}
+function stepRemoteChars(now,k){for(const[key,g]of remoteChars){
+    if(now-g.seen>2500||g.done&&now-g.doneAt>(g.p.drop?320:260)){g.el.remove();remoteChars.delete(key);if(!g.done&&g.p.sid)renderNodes();continue;}
+    const tg=remoteCharTarget(g.p);if(g.x==null){g.x=tg.x;g.y=tg.y;g.h=tg.h;}
+    const kk=g.done?Math.max(k,.35):k;g.x+=(tg.x-g.x)*kk;g.y+=(tg.y-g.y)*kk;g.h+=(tg.h-g.h)*kk;
+    const ar=g.img.naturalWidth?g.img.naturalWidth/g.img.naturalHeight:2/3;
+    g.img.style.height=g.h+'px';g.el.style.transform=`translate(${(g.x-g.h*ar/2).toFixed(1)}px,${(g.y-g.h).toFixed(1)}px)`;
+    // soltou fora de um palco: some; soltou num palco: a cena sincronizada mostra o sprite de verdade
+    g.el.classList.toggle('out',!!g.done);}}
 function onRemoteDrag(row){if(isMine(row.connectionId)||row.storyId!==storyId)return;let moves;try{moves=JSON.parse(row.moves);}catch(_){return;}const p=profOf(row.identity);const now=performance.now();
+  if(Array.isArray(moves[0])&&moves[0][0]==='@char'){onRemoteChar(row,moves[0][1],p,now);return;}
   for(const[id,x,y]of moves){const s=scene(id);if(!s)continue;let r=remoteDrag.get(id);
     if(!r){r={x:s.x,y:dispY(s),color:p.color,name:p.name};remoteDrag.set(id,r);const el=nodeEl(id);if(el){el.classList.add('rdrag');el.style.setProperty('--rc',p.color);el.dataset.who=p.name;}}
     Object.assign(r,{tx:x,ty:y,seen:now,done:row.done});}
@@ -1150,6 +1181,7 @@ function stepRemote(now){const dt=Math.min(250,lastStep?now-lastStep:16);lastSte
     const el=nodeEl(id);
     if(!s||landed||(!r.done&&now-r.seen>2000)){remoteDrag.delete(id);if(el){el.classList.remove('rdrag');el.style.left=(s?s.x:0)+'px';el.style.top=(s?dispY(s):0)+'px';}continue;}
     if(el){el.style.left=r.x+'px';el.style.top=r.y+'px';if(!el.classList.contains('rdrag')){el.classList.add('rdrag');el.style.setProperty('--rc',r.color);el.dataset.who=r.name;}}}
+  stepRemoteChars(now,k);
   for(const c of cursors.values()){c.x+=(c.tx-c.x)*k;c.y+=(c.ty-c.y)*k;c.el.style.transform=`translate(${c.x}px,${c.y}px) scale(${1/view.z})`;}}
 function syncCursors(){if(!conn)return;if(!cursorLayer){cursorLayer=document.createElement('div');cursorLayer.className='rcursors';world.appendChild(cursorLayer);}
   const live=new Set;
