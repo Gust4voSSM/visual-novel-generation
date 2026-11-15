@@ -34,6 +34,7 @@ import {
 } from "spacetimedb";
 
 // Import all reducer arg schemas
+import AddPoseReducer from "./add_pose_reducer";
 import ApplyOperationsReducer from "./apply_operations_reducer";
 import CancelInviteReducer from "./cancel_invite_reducer";
 import ClaimJobReducer from "./claim_job_reducer";
@@ -43,6 +44,8 @@ import CompleteJobReducer from "./complete_job_reducer";
 import CreateStoryReducer from "./create_story_reducer";
 import DeleteStoryReducer from "./delete_story_reducer";
 import FailJobReducer from "./fail_job_reducer";
+import GenerateBackgroundReducer from "./generate_background_reducer";
+import GenerateCharacterReducer from "./generate_character_reducer";
 import JoinByLinkReducer from "./join_by_link_reducer";
 import LockFieldReducer from "./lock_field_reducer";
 import OpenStoryReducer from "./open_story_reducer";
@@ -55,6 +58,7 @@ import RenameStoryReducer from "./rename_story_reducer";
 import RenewFieldLockReducer from "./renew_field_lock_reducer";
 import RequestAiReducer from "./request_ai_reducer";
 import ResetStoryReducer from "./reset_story_reducer";
+import RetryGenerationReducer from "./retry_generation_reducer";
 import SendDragReducer from "./send_drag_reducer";
 import SetLinkAccessReducer from "./set_link_access_reducer";
 import SetProfileReducer from "./set_profile_reducer";
@@ -68,6 +72,9 @@ import * as SuggestSceneProcedure from "./suggest_scene_procedure";
 // Import all table schema definitions
 import ChatChunkRow from "./chat_chunk_table";
 import CurAccountRow from "./cur_account_table";
+import CurBackgroundRow from "./cur_background_table";
+import CurCharacterRow from "./cur_character_table";
+import CurCharsheetRow from "./cur_charsheet_table";
 import CurChoiceRow from "./cur_choice_table";
 import CurInviteRow from "./cur_invite_table";
 import CurLinkRow from "./cur_link_table";
@@ -76,6 +83,7 @@ import CurMemberRow from "./cur_member_table";
 import CurPresenceRow from "./cur_presence_table";
 import CurProfileRow from "./cur_profile_table";
 import CurSceneRow from "./cur_scene_table";
+import CurSpriteRow from "./cur_sprite_table";
 import CurStoryRow from "./cur_story_table";
 import DragsRow from "./drags_table";
 import MyAccountRow from "./my_account_table";
@@ -84,9 +92,12 @@ import MyChatMessageRow from "./my_chat_message_table";
 import MyMembershipsRow from "./my_memberships_table";
 import MyStoriesRow from "./my_stories_table";
 import ProfileRow from "./profile_table";
+import WorkerBackgroundRow from "./worker_background_table";
+import WorkerCharacterRow from "./worker_character_table";
 import WorkerChoiceRow from "./worker_choice_table";
 import WorkerQueueRow from "./worker_queue_table";
 import WorkerSceneRow from "./worker_scene_table";
+import WorkerSpriteRow from "./worker_sprite_table";
 import WorkerStoryRow from "./worker_story_table";
 
 /** Type-only namespace exports for generated type groups. */
@@ -127,6 +138,27 @@ const tablesSchema = __schema({
     constraints: [
     ],
   }, CurAccountRow),
+  curBackground: __table({
+    name: 'cur_background',
+    indexes: [
+    ],
+    constraints: [
+    ],
+  }, CurBackgroundRow),
+  curCharacter: __table({
+    name: 'cur_character',
+    indexes: [
+    ],
+    constraints: [
+    ],
+  }, CurCharacterRow),
+  curCharsheet: __table({
+    name: 'cur_charsheet',
+    indexes: [
+    ],
+    constraints: [
+    ],
+  }, CurCharsheetRow),
   curChoice: __table({
     name: 'cur_choice',
     indexes: [
@@ -183,6 +215,13 @@ const tablesSchema = __schema({
     constraints: [
     ],
   }, CurSceneRow),
+  curSprite: __table({
+    name: 'cur_sprite',
+    indexes: [
+    ],
+    constraints: [
+    ],
+  }, CurSpriteRow),
   curStory: __table({
     name: 'cur_story',
     indexes: [
@@ -225,6 +264,20 @@ const tablesSchema = __schema({
     constraints: [
     ],
   }, MyStoriesRow),
+  workerBackground: __table({
+    name: 'worker_background',
+    indexes: [
+    ],
+    constraints: [
+    ],
+  }, WorkerBackgroundRow),
+  workerCharacter: __table({
+    name: 'worker_character',
+    indexes: [
+    ],
+    constraints: [
+    ],
+  }, WorkerCharacterRow),
   workerChoice: __table({
     name: 'worker_choice',
     indexes: [
@@ -246,6 +299,13 @@ const tablesSchema = __schema({
     constraints: [
     ],
   }, WorkerSceneRow),
+  workerSprite: __table({
+    name: 'worker_sprite',
+    indexes: [
+    ],
+    constraints: [
+    ],
+  }, WorkerSpriteRow),
   workerStory: __table({
     name: 'worker_story',
     indexes: [
@@ -257,6 +317,7 @@ const tablesSchema = __schema({
 
 /** The schema information for all reducers in this module. This is defined the same way as the reducers would have been defined in the server, except the body of the reducer is omitted in code generation. */
 const reducersSchema = __reducers(
+  __reducerSchema("add_pose", AddPoseReducer),
   __reducerSchema("apply_operations", ApplyOperationsReducer),
   __reducerSchema("cancel_invite", CancelInviteReducer),
   __reducerSchema("claim_job", ClaimJobReducer),
@@ -266,6 +327,8 @@ const reducersSchema = __reducers(
   __reducerSchema("create_story", CreateStoryReducer),
   __reducerSchema("delete_story", DeleteStoryReducer),
   __reducerSchema("fail_job", FailJobReducer),
+  __reducerSchema("generate_background", GenerateBackgroundReducer),
+  __reducerSchema("generate_character", GenerateCharacterReducer),
   __reducerSchema("join_by_link", JoinByLinkReducer),
   __reducerSchema("lock_field", LockFieldReducer),
   __reducerSchema("open_story", OpenStoryReducer),
@@ -278,6 +341,7 @@ const reducersSchema = __reducers(
   __reducerSchema("renew_field_lock", RenewFieldLockReducer),
   __reducerSchema("request_ai", RequestAiReducer),
   __reducerSchema("reset_story", ResetStoryReducer),
+  __reducerSchema("retry_generation", RetryGenerationReducer),
   __reducerSchema("send_drag", SendDragReducer),
   __reducerSchema("set_link_access", SetLinkAccessReducer),
   __reducerSchema("set_profile", SetProfileReducer),
@@ -295,6 +359,12 @@ type __SchemaWithTableAccessorAliases = Omit<typeof tablesSchema.schemaType, "ta
   tables: typeof tablesSchema.schemaType.tables & {
     /** @deprecated Use `curAccount` instead. This alias will be removed in the next major version. */
     readonly "cur_account": Omit<typeof tablesSchema.schemaType.tables["curAccount"], "accessorName"> & { readonly accessorName: "cur_account" };
+    /** @deprecated Use `curBackground` instead. This alias will be removed in the next major version. */
+    readonly "cur_background": Omit<typeof tablesSchema.schemaType.tables["curBackground"], "accessorName"> & { readonly accessorName: "cur_background" };
+    /** @deprecated Use `curCharacter` instead. This alias will be removed in the next major version. */
+    readonly "cur_character": Omit<typeof tablesSchema.schemaType.tables["curCharacter"], "accessorName"> & { readonly accessorName: "cur_character" };
+    /** @deprecated Use `curCharsheet` instead. This alias will be removed in the next major version. */
+    readonly "cur_charsheet": Omit<typeof tablesSchema.schemaType.tables["curCharsheet"], "accessorName"> & { readonly accessorName: "cur_charsheet" };
     /** @deprecated Use `curChoice` instead. This alias will be removed in the next major version. */
     readonly "cur_choice": Omit<typeof tablesSchema.schemaType.tables["curChoice"], "accessorName"> & { readonly accessorName: "cur_choice" };
     /** @deprecated Use `curInvite` instead. This alias will be removed in the next major version. */
@@ -311,6 +381,8 @@ type __SchemaWithTableAccessorAliases = Omit<typeof tablesSchema.schemaType, "ta
     readonly "cur_profile": Omit<typeof tablesSchema.schemaType.tables["curProfile"], "accessorName"> & { readonly accessorName: "cur_profile" };
     /** @deprecated Use `curScene` instead. This alias will be removed in the next major version. */
     readonly "cur_scene": Omit<typeof tablesSchema.schemaType.tables["curScene"], "accessorName"> & { readonly accessorName: "cur_scene" };
+    /** @deprecated Use `curSprite` instead. This alias will be removed in the next major version. */
+    readonly "cur_sprite": Omit<typeof tablesSchema.schemaType.tables["curSprite"], "accessorName"> & { readonly accessorName: "cur_sprite" };
     /** @deprecated Use `curStory` instead. This alias will be removed in the next major version. */
     readonly "cur_story": Omit<typeof tablesSchema.schemaType.tables["curStory"], "accessorName"> & { readonly accessorName: "cur_story" };
     /** @deprecated Use `myAccount` instead. This alias will be removed in the next major version. */
@@ -323,12 +395,18 @@ type __SchemaWithTableAccessorAliases = Omit<typeof tablesSchema.schemaType, "ta
     readonly "my_memberships": Omit<typeof tablesSchema.schemaType.tables["myMemberships"], "accessorName"> & { readonly accessorName: "my_memberships" };
     /** @deprecated Use `myStories` instead. This alias will be removed in the next major version. */
     readonly "my_stories": Omit<typeof tablesSchema.schemaType.tables["myStories"], "accessorName"> & { readonly accessorName: "my_stories" };
+    /** @deprecated Use `workerBackground` instead. This alias will be removed in the next major version. */
+    readonly "worker_background": Omit<typeof tablesSchema.schemaType.tables["workerBackground"], "accessorName"> & { readonly accessorName: "worker_background" };
+    /** @deprecated Use `workerCharacter` instead. This alias will be removed in the next major version. */
+    readonly "worker_character": Omit<typeof tablesSchema.schemaType.tables["workerCharacter"], "accessorName"> & { readonly accessorName: "worker_character" };
     /** @deprecated Use `workerChoice` instead. This alias will be removed in the next major version. */
     readonly "worker_choice": Omit<typeof tablesSchema.schemaType.tables["workerChoice"], "accessorName"> & { readonly accessorName: "worker_choice" };
     /** @deprecated Use `workerQueue` instead. This alias will be removed in the next major version. */
     readonly "worker_queue": Omit<typeof tablesSchema.schemaType.tables["workerQueue"], "accessorName"> & { readonly accessorName: "worker_queue" };
     /** @deprecated Use `workerScene` instead. This alias will be removed in the next major version. */
     readonly "worker_scene": Omit<typeof tablesSchema.schemaType.tables["workerScene"], "accessorName"> & { readonly accessorName: "worker_scene" };
+    /** @deprecated Use `workerSprite` instead. This alias will be removed in the next major version. */
+    readonly "worker_sprite": Omit<typeof tablesSchema.schemaType.tables["workerSprite"], "accessorName"> & { readonly accessorName: "worker_sprite" };
     /** @deprecated Use `workerStory` instead. This alias will be removed in the next major version. */
     readonly "worker_story": Omit<typeof tablesSchema.schemaType.tables["workerStory"], "accessorName"> & { readonly accessorName: "worker_story" };
   };
@@ -350,6 +428,9 @@ const REMOTE_MODULE = {
 
 const tableAccessorAliases = {
   "cur_account": "curAccount",
+  "cur_background": "curBackground",
+  "cur_character": "curCharacter",
+  "cur_charsheet": "curCharsheet",
   "cur_choice": "curChoice",
   "cur_invite": "curInvite",
   "cur_link": "curLink",
@@ -358,15 +439,19 @@ const tableAccessorAliases = {
   "cur_presence": "curPresence",
   "cur_profile": "curProfile",
   "cur_scene": "curScene",
+  "cur_sprite": "curSprite",
   "cur_story": "curStory",
   "my_account": "myAccount",
   "my_ai_job": "myAiJob",
   "my_chat_message": "myChatMessage",
   "my_memberships": "myMemberships",
   "my_stories": "myStories",
+  "worker_background": "workerBackground",
+  "worker_character": "workerCharacter",
   "worker_choice": "workerChoice",
   "worker_queue": "workerQueue",
   "worker_scene": "workerScene",
+  "worker_sprite": "workerSprite",
   "worker_story": "workerStory",
 } as const;
 
@@ -390,6 +475,12 @@ type __DbViewBase = __DbConnectionImpl<typeof REMOTE_MODULE>["db"];
 export type DbView = __DbViewBase & {
   /** @deprecated Use `curAccount` instead. This alias will be removed in the next major version. */
   readonly "cur_account": __DbViewBase["curAccount"];
+  /** @deprecated Use `curBackground` instead. This alias will be removed in the next major version. */
+  readonly "cur_background": __DbViewBase["curBackground"];
+  /** @deprecated Use `curCharacter` instead. This alias will be removed in the next major version. */
+  readonly "cur_character": __DbViewBase["curCharacter"];
+  /** @deprecated Use `curCharsheet` instead. This alias will be removed in the next major version. */
+  readonly "cur_charsheet": __DbViewBase["curCharsheet"];
   /** @deprecated Use `curChoice` instead. This alias will be removed in the next major version. */
   readonly "cur_choice": __DbViewBase["curChoice"];
   /** @deprecated Use `curInvite` instead. This alias will be removed in the next major version. */
@@ -406,6 +497,8 @@ export type DbView = __DbViewBase & {
   readonly "cur_profile": __DbViewBase["curProfile"];
   /** @deprecated Use `curScene` instead. This alias will be removed in the next major version. */
   readonly "cur_scene": __DbViewBase["curScene"];
+  /** @deprecated Use `curSprite` instead. This alias will be removed in the next major version. */
+  readonly "cur_sprite": __DbViewBase["curSprite"];
   /** @deprecated Use `curStory` instead. This alias will be removed in the next major version. */
   readonly "cur_story": __DbViewBase["curStory"];
   /** @deprecated Use `myAccount` instead. This alias will be removed in the next major version. */
@@ -418,12 +511,18 @@ export type DbView = __DbViewBase & {
   readonly "my_memberships": __DbViewBase["myMemberships"];
   /** @deprecated Use `myStories` instead. This alias will be removed in the next major version. */
   readonly "my_stories": __DbViewBase["myStories"];
+  /** @deprecated Use `workerBackground` instead. This alias will be removed in the next major version. */
+  readonly "worker_background": __DbViewBase["workerBackground"];
+  /** @deprecated Use `workerCharacter` instead. This alias will be removed in the next major version. */
+  readonly "worker_character": __DbViewBase["workerCharacter"];
   /** @deprecated Use `workerChoice` instead. This alias will be removed in the next major version. */
   readonly "worker_choice": __DbViewBase["workerChoice"];
   /** @deprecated Use `workerQueue` instead. This alias will be removed in the next major version. */
   readonly "worker_queue": __DbViewBase["workerQueue"];
   /** @deprecated Use `workerScene` instead. This alias will be removed in the next major version. */
   readonly "worker_scene": __DbViewBase["workerScene"];
+  /** @deprecated Use `workerSprite` instead. This alias will be removed in the next major version. */
+  readonly "worker_sprite": __DbViewBase["workerSprite"];
   /** @deprecated Use `workerStory` instead. This alias will be removed in the next major version. */
   readonly "worker_story": __DbViewBase["workerStory"];
 };
@@ -432,6 +531,12 @@ type __TablesBase = __QueryBuilder<typeof tablesSchema.schemaType>;
 export type Tables = __TablesBase & {
   /** @deprecated Use `curAccount` instead. This alias will be removed in the next major version. */
   readonly "cur_account": __TablesBase["curAccount"];
+  /** @deprecated Use `curBackground` instead. This alias will be removed in the next major version. */
+  readonly "cur_background": __TablesBase["curBackground"];
+  /** @deprecated Use `curCharacter` instead. This alias will be removed in the next major version. */
+  readonly "cur_character": __TablesBase["curCharacter"];
+  /** @deprecated Use `curCharsheet` instead. This alias will be removed in the next major version. */
+  readonly "cur_charsheet": __TablesBase["curCharsheet"];
   /** @deprecated Use `curChoice` instead. This alias will be removed in the next major version. */
   readonly "cur_choice": __TablesBase["curChoice"];
   /** @deprecated Use `curInvite` instead. This alias will be removed in the next major version. */
@@ -448,6 +553,8 @@ export type Tables = __TablesBase & {
   readonly "cur_profile": __TablesBase["curProfile"];
   /** @deprecated Use `curScene` instead. This alias will be removed in the next major version. */
   readonly "cur_scene": __TablesBase["curScene"];
+  /** @deprecated Use `curSprite` instead. This alias will be removed in the next major version. */
+  readonly "cur_sprite": __TablesBase["curSprite"];
   /** @deprecated Use `curStory` instead. This alias will be removed in the next major version. */
   readonly "cur_story": __TablesBase["curStory"];
   /** @deprecated Use `myAccount` instead. This alias will be removed in the next major version. */
@@ -460,12 +567,18 @@ export type Tables = __TablesBase & {
   readonly "my_memberships": __TablesBase["myMemberships"];
   /** @deprecated Use `myStories` instead. This alias will be removed in the next major version. */
   readonly "my_stories": __TablesBase["myStories"];
+  /** @deprecated Use `workerBackground` instead. This alias will be removed in the next major version. */
+  readonly "worker_background": __TablesBase["workerBackground"];
+  /** @deprecated Use `workerCharacter` instead. This alias will be removed in the next major version. */
+  readonly "worker_character": __TablesBase["workerCharacter"];
   /** @deprecated Use `workerChoice` instead. This alias will be removed in the next major version. */
   readonly "worker_choice": __TablesBase["workerChoice"];
   /** @deprecated Use `workerQueue` instead. This alias will be removed in the next major version. */
   readonly "worker_queue": __TablesBase["workerQueue"];
   /** @deprecated Use `workerScene` instead. This alias will be removed in the next major version. */
   readonly "worker_scene": __TablesBase["workerScene"];
+  /** @deprecated Use `workerSprite` instead. This alias will be removed in the next major version. */
+  readonly "worker_sprite": __TablesBase["workerSprite"];
   /** @deprecated Use `workerStory` instead. This alias will be removed in the next major version. */
   readonly "worker_story": __TablesBase["workerStory"];
 };

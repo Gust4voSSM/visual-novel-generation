@@ -157,6 +157,57 @@ await test('background com falha do provedor → failed', async () => {
   assert(job.status === 'failed' && job.error === 'AI_PROVIDER_ERROR', job.status + ' ' + job.error);
 });
 
+console.log('\nelenco em tabelas (geração sem bloquear, imagens como links)');
+const spriteRow = (c: Client, id: string) => c.conn.db.curSprite.id.find(id);
+await test('generate_character: personagem e poses aparecem já; charsheet e depois uma pose por pedido', async () => {
+  const cid = uid('c'), poses = [{ id: uid('sp'), name: 'Neutro', desc: 'calma' }, { id: uid('sp'), name: 'Feliz', desc: 'sorriso' }];
+  await B.conn.reducers.generateCharacter({ storyId: T.story, characterId: cid, jobId: uid('j'), name: 'Rita', desc: 'cabelo curto', color: '', poses: JSON.stringify(poses) });
+  const c0 = B.conn.db.curCharacter.id.find(cid);
+  assert(c0?.status === 'generating' && spriteRow(B, poses[0].id)?.status === 'pending', 'linhas não nasceram gerando');
+  await waitFor('poses prontas', () => poses.every(p => spriteRow(B, p.id)?.imageKey) ? true : null, 20_000);
+  const c1 = B.conn.db.curCharacter.id.find(cid)!;
+  assert(c1.status === '' && c1.sheetId, 'charsheet não gravado');
+  assert(spriteRow(B, poses[1].id)!.imageKey.endsWith('sprite-happy.svg') && spriteRow(B, poses[1].id)!.status === '', 'pose errada');
+  const jobs = [...B.conn.db.myAiJob.iter()].filter(j => j.input.includes(cid));
+  assert(jobs.filter(j => j.kind === 'charsheet').length === 1 && jobs.filter(j => j.kind === 'pose').length === 2, 'um pedido por pose');
+  // Pose nova com o charsheet pronto: vai direto para a fila, no fim da lista.
+  const sp = uid('sp');
+  await B.conn.reducers.addPose({ storyId: T.story, characterId: cid, spriteId: sp, jobId: uid('j'), name: 'Pensativa', desc: 'mão no queixo' });
+  await waitFor('pose nova', () => spriteRow(B, sp)?.imageKey ? true : null, 20_000);
+  assert(spriteRow(B, sp)!.position === 2, 'posição da pose nova');
+});
+await test('pose falhada fica na tabela; tentar de novo gera', async () => {
+  const cid = uid('c'), sp = uid('sp');
+  await B.conn.reducers.generateCharacter({ storyId: T.story, characterId: cid, jobId: uid('j'), name: 'Caio', desc: 'barba', color: '', poses: JSON.stringify([{ id: sp, name: 'Bravo', desc: '#falha' }]) });
+  await waitFor('pose falhou', () => spriteRow(B, sp)?.status === 'failed' ? true : null, 20_000);
+  assert(spriteRow(B, sp)!.error === 'AI_PROVIDER_ERROR', spriteRow(B, sp)!.error);
+  await B.conn.reducers.applyOperations({ storyId: T.story, ops: JSON.stringify([{ op: 'upsert_sprite', sprite: { id: sp, desc: 'sobrancelhas franzidas' } }]) });
+  await B.conn.reducers.retryGeneration({ storyId: T.story, target: 'sprite', id: sp, jobId: uid('j') });
+  await waitFor('pose refeita', () => spriteRow(B, sp)?.imageKey ? true : null, 20_000);
+});
+await test('sem charsheet → NO_SHEET; imagem só como link do app; em uso numa cena → USED', async () => {
+  const cid = uid('c');
+  const ops = (o: unknown[]) => B.conn.reducers.applyOperations({ storyId: T.story, ops: JSON.stringify(o) });
+  await ops([{ op: 'upsert_character', character: { id: cid, name: 'Upload' } }]);
+  await rejects(B.conn.reducers.addPose({ storyId: T.story, characterId: cid, spriteId: uid('sp'), jobId: uid('j'), name: 'x', desc: '' }), 'NO_SHEET');
+  const ok = uid('sp');
+  await ops([{ op: 'upsert_sprite', sprite: { id: ok, characterId: cid, imageKey: 'img/' + '0'.repeat(32) + '.png' } }]);
+  await rejects(ops([{ op: 'upsert_sprite', sprite: { id: uid('sp'), characterId: cid, imageKey: 'https://exemplo.com/a.png' } }]), 'INVALID');
+  await rejects(ops([{ op: 'upsert_sprite', sprite: { id: uid('sp'), characterId: cid, imageKey: 'data:image/png;base64,AAAA' } }]), 'INVALID');
+  await ops([{ op: 'upsert_scene', scene: { id: T.s1, chars: JSON.stringify([{ c: cid, s: ok }]) } }]);
+  await rejects(ops([{ op: 'delete_character', id: cid }]), 'USED');
+  // Tirando da cena no mesmo lote, apaga (com os sprites).
+  await ops([{ op: 'upsert_scene', scene: { id: T.s1, chars: '[]' } }, { op: 'delete_character', id: cid }]);
+  await waitFor('apagado', () => !B.conn.db.curCharacter.id.find(cid) && !spriteRow(B, ok) ? true : null);
+});
+await test('generate_background: linha gerando → pronta', async () => {
+  const bid = uid('b');
+  await B.conn.reducers.generateBackground({ storyId: T.story, backgroundId: bid, jobId: uid('j'), name: 'Farol', desc: 'noite estrelada' });
+  assert(B.conn.db.curBackground.id.find(bid)?.status === 'generating', 'não nasceu gerando');
+  await waitFor('background pronto', () => B.conn.db.curBackground.id.find(bid)?.imageKey ? true : null, 20_000);
+  assert(B.conn.db.curBackground.id.find(bid)!.imageKey.endsWith('bg-night.svg'), 'imagem');
+});
+
 console.log('\nregras da fila');
 await test('request_ai repetido com o mesmo id não duplica', async () => {
   const id = uid('j');

@@ -1,62 +1,7 @@
 import { DbConnection } from './module_bindings';
 import qrcode from 'qrcode-generator';
-/* ---------- art generators (placeholders for uploads / AI output) ---------- */
-const enc=s=>'data:image/svg+xml;charset=utf-8,'+encodeURIComponent(s);
-const norm=s=>(s||'').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'');
-function emotionKind(name,desc){const t=norm(name+' '+desc);
-  if(/feliz|alegr|sorri|content|ri(nd|s)/.test(t))return'happy';
-  if(/trist|chor|melanc|desanim/.test(t))return'sad';
-  if(/surpre|choc|espant|assust/.test(t))return'surprised';
-  if(/brav|raiv|irrit|zang|furi/.test(t))return'angry';
-  if(/vergonh|timid|corad|envergonh/.test(t))return'shy';
-  if(/pensat|duvid|descon|curios/.test(t))return'thinking';
-  return'neutral';}
-function face(k){const s='#2b2230';
-  const eyes={neutral:`<circle cx="82" cy="110" r="5" fill="${s}"/><circle cx="118" cy="110" r="5" fill="${s}"/>`,
-    happy:`<path d="M75 112q7-9 14 0M111 112q7-9 14 0" stroke="${s}" stroke-width="4" fill="none" stroke-linecap="round"/>`,
-    sad:`<circle cx="82" cy="113" r="4" fill="${s}"/><circle cx="118" cy="113" r="4" fill="${s}"/><path d="M72 100l16-5M128 100l-16-5" stroke="${s}" stroke-width="3" stroke-linecap="round"/>`,
-    surprised:`<circle cx="82" cy="108" r="7" fill="#fff" stroke="${s}" stroke-width="3"/><circle cx="118" cy="108" r="7" fill="#fff" stroke="${s}" stroke-width="3"/><circle cx="82" cy="108" r="3" fill="${s}"/><circle cx="118" cy="108" r="3" fill="${s}"/>`,
-    angry:`<circle cx="83" cy="112" r="4" fill="${s}"/><circle cx="117" cy="112" r="4" fill="${s}"/><path d="M72 97l18 8M128 97l-18 8" stroke="${s}" stroke-width="4" stroke-linecap="round"/>`,
-    shy:`<path d="M76 111q6-6 12 0M112 111q6-6 12 0" stroke="${s}" stroke-width="3.5" fill="none" stroke-linecap="round"/><ellipse cx="72" cy="126" rx="10" ry="5" fill="#ec7b8f" opacity=".6"/><ellipse cx="128" cy="126" rx="10" ry="5" fill="#ec7b8f" opacity=".6"/>`,
-    thinking:`<circle cx="84" cy="110" r="4.5" fill="${s}"/><circle cx="120" cy="110" r="4.5" fill="${s}"/><path d="M110 97l18-3" stroke="${s}" stroke-width="3" stroke-linecap="round"/>`};
-  const mouth={neutral:`<path d="M89 137h22" stroke="${s}" stroke-width="3.5" stroke-linecap="round"/>`,
-    happy:`<path d="M84 131q16 18 32 0z" fill="#8c2f3c" stroke="${s}" stroke-width="2.5" stroke-linejoin="round"/>`,
-    sad:`<path d="M87 142q13-11 26 0" stroke="${s}" stroke-width="3.5" fill="none" stroke-linecap="round"/>`,
-    surprised:`<ellipse cx="100" cy="139" rx="7" ry="9" fill="#8c2f3c" stroke="${s}" stroke-width="2.5"/>`,
-    angry:`<path d="M87 141q13-7 26 0" stroke="${s}" stroke-width="4" fill="none" stroke-linecap="round"/>`,
-    shy:`<path d="M92 136q8 5 16 0" stroke="${s}" stroke-width="3" fill="none" stroke-linecap="round"/>`,
-    thinking:`<path d="M90 139q8-4 20 1" stroke="${s}" stroke-width="3.5" fill="none" stroke-linecap="round"/>`};
-  return eyes[k]+mouth[k];}
-function spriteArt(look,emotionName,emotionDesc){const k=emotionKind(emotionName,emotionDesc),{hair,skin,outfit,style}=look;
-  const longHair=style==='long'?`<path d="M42 100c-4 60 6 95 22 110h72c16-15 26-50 22-110z" fill="${hair}"/>`:'';
-  const beard=style==='beard'?`<path d="M56 120c4 40 22 52 44 52s40-12 44-52c-10 18-26 22-44 22s-34-4-44-22z" fill="${hair}"/>`:'';
-  const svg=`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 300">${longHair}<ellipse cx="100" cy="92" rx="60" ry="64" fill="${hair}"/><path d="M28 300c0-70 30-102 72-102s72 32 72 102z" fill="${outfit}"/><path d="M70 205l30 30 30-30" fill="none" stroke="rgba(255,255,255,.35)" stroke-width="5"/><rect x="88" y="150" width="24" height="52" rx="8" fill="${skin}"/><ellipse cx="100" cy="108" rx="47" ry="55" fill="${skin}"/>${beard}<path d="M50 98c2-48 98-48 100 0-20-22-80-22-100 0z" fill="${hair}"/>${face(k)}</svg>`;
-  return enc(svg);}
-function lookFrom(desc,color){const t=norm(desc);
-  const hair=/loir|dourad/.test(t)?'#e7c262':/ruiv|laranj/.test(t)?'#c4532b':/pret|negro/.test(t)?'#25202a':/castanh|marrom/.test(t)?'#6b4130':/azul/.test(t)?'#3e6fd3':/rosa/.test(t)?'#e07aa8':/branc|grisalh|cinza/.test(t)?'#d8d5cf':/verde/.test(t)?'#3e9a6c':/roxo|lilas/.test(t)?'#7c4cc6':'#4b3a33';
-  const skin=/pele (escura|negra)|negr[oa]/.test(t)?'#8a5a3c':/moren/.test(t)?'#c08a62':/palid|clar/.test(t)?'#f6dcc6':'#f0c6a3';
-  const style=/barb/.test(t)?'beard':/(cabelo )?(longo|comprid)/.test(t)?'long':'short';
-  return{hair,skin,outfit:color||'#5a6478',style};}
-function bgArt(name,desc){const t=norm(name+' '+desc);let body='';
-  const sky=(a,b)=>`<defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${a}"/><stop offset="1" stop-color="${b}"/></linearGradient></defs><rect width="1600" height="900" fill="url(#g)"/>`;
-  if(/farol|noite|estrel/.test(t)&&!/cidade|rua/.test(t)){
-    body=sky('#0d1633','#2c3466');for(let i=0;i<60;i++){const x=(i*271)%1600,y=(i*137)%420;body+=`<circle cx="${x}" cy="${y}" r="${1+(i%3)}" fill="#fff" opacity="${.4+(i%5)/10}"/>`}
-    body+=`<circle cx="1320" cy="150" r="60" fill="#f4edd0"/><path d="M0 700q400-60 800 0t800 0v200H0z" fill="#162048"/><path d="M0 760q300-30 700 10t900-10v140H0z" fill="#101635"/><path d="M640 760l40-460h80l40 460z" fill="#e9e4dc"/><path d="M660 520h120M655 600h130M650 680h140" stroke="#c0423a" stroke-width="34"/><rect x="668" y="250" width="104" height="60" fill="#2b3550"/><path d="M650 250h140l-70-60z" fill="#c0423a"/><rect x="690" y="262" width="60" height="38" fill="#ffe8a3"/><path d="M720 280L1600 120v330z" fill="#ffe8a3" opacity=".14"/>`;}
-  else if(/praia|mar|litoral|oceano/.test(t)){
-    body=sky('#ffb27a','#ffd9a0')+`<circle cx="800" cy="520" r="120" fill="#ffefb8"/><rect y="520" width="1600" height="200" fill="#3f86b8"/><path d="M0 560h1600M0 610h1600" stroke="#ffd9a0" stroke-opacity=".35" stroke-width="6" stroke-dasharray="80 60"/><path d="M0 700q400-50 800-10t800-20v230H0z" fill="#efd3a1"/><path d="M1240 720c10-150 30-260 70-330" stroke="#5b3a24" stroke-width="22" fill="none"/><path d="M1310 390c-80-20-160 10-200 60M1310 390c60-50 150-50 200 0M1310 390c-30-60-110-90-180-70M1310 390c50-70 130-80 180-50" stroke="#2f6b3f" stroke-width="26" fill="none" stroke-linecap="round"/>`;}
-  else if(/cafe|bar|restaur|cozinh|padar/.test(t)){
-    body=`<rect width="1600" height="900" fill="#d9b48a"/><rect y="600" width="1600" height="300" fill="#7a4e2f"/><path d="M0 600h1600" stroke="#5b3720" stroke-width="10"/><rect x="980" y="140" width="460" height="320" rx="10" fill="#9fd0e6" stroke="#6b4428" stroke-width="22"/><path d="M1210 140v320M980 300h460" stroke="#6b4428" stroke-width="14"/><rect x="140" y="170" width="520" height="22" fill="#6b4428"/><rect x="140" y="330" width="520" height="22" fill="#6b4428"/>`+[0,1,2,3,4].map(i=>`<rect x="${170+i*95}" y="${100}" width="50" height="70" rx="8" fill="${['#c35d3c','#e0b04c','#4d8b74','#ce7b8a','#5d77b8'][i]}"/><rect x="${175+i*95}" y="${270}" width="40" height="60" rx="18" fill="#f2eee6"/>`).join('')+`<rect x="80" y="560" width="1440" height="60" rx="8" fill="#5b3720"/>`;}
-  else if(/sala de aula|escola|aula|classe/.test(t)){
-    body=`<rect width="1600" height="900" fill="#e8e2cf"/><rect y="640" width="1600" height="260" fill="#9a7b56"/><rect x="380" y="120" width="840" height="380" rx="8" fill="#2f5a46" stroke="#8a6a44" stroke-width="18"/><path d="M460 220h300M460 280h420M460 340h220" stroke="#e8f0e6" stroke-width="8" stroke-linecap="round" opacity=".7"/>`+[0,1,2].map(i=>`<rect x="${120+i*520}" y="660" width="320" height="30" rx="6" fill="#c9a374"/><rect x="${140+i*520}" y="690" width="16" height="150" fill="#6b4c2f"/><rect x="${404+i*520}" y="690" width="16" height="150" fill="#6b4c2f"/>`).join('')+`<rect x="1320" y="130" width="200" height="300" fill="#a9d7ee" stroke="#8a6a44" stroke-width="14"/>`;}
-  else if(/floresta|bosque|parque|mata|jardim/.test(t)){
-    body=sky('#a7e0d0','#e8f5d8')+`<path d="M0 640q400-80 800-20t800-30v310H0z" fill="#6bab5e"/>`+[...Array(9)].map((_,i)=>{const x=60+i*190,h=380+(i%3)*80;return`<rect x="${x+40}" y="${700-h*0.35}" width="34" height="${h*0.4}" fill="#5b3b25"/><circle cx="${x+57}" cy="${700-h*0.55}" r="${110+(i%2)*20}" fill="${i%2?'#2f7a49':'#3c8f55'}"/>`}).join('')+[...Array(14)].map((_,i)=>`<circle cx="${(i*233)%1600}" cy="${300+(i*97)%300}" r="5" fill="#fff6a8" opacity=".85"/>`).join('');}
-  else if(/cidade|rua|urban|predio/.test(t)){
-    const night=/noite/.test(t);body=sky(night?'#141a3a':'#8fc3ef',night?'#4a3b6e':'#dbeefa');
-    body+=[...Array(10)].map((_,i)=>{const w=130+(i%3)*30,h=260+((i*73)%280),x=i*165-20;let win='';for(let r=0;r<Math.floor(h/60);r++)for(let c=0;c<3;c++)win+=`<rect x="${x+18+c*(w-36)/3}" y="${700-h+20+r*60}" width="22" height="30" fill="${night&&(r+c+i)%3?'#ffd97a':'#3a4466'}" opacity="${night?1:.5}"/>`;return`<rect x="${x}" y="${700-h}" width="${w}" height="${h}" fill="${night?'#232a4a':'#7b8aa6'}"/>${win}`}).join('')+`<rect y="700" width="1600" height="200" fill="${night?'#1a1d2b':'#565d6c'}"/><path d="M0 800h1600" stroke="#f3d35b" stroke-width="10" stroke-dasharray="90 70"/>`;}
-  else if(/quarto|casa|interior|sala|aconcheg/.test(t)){
-    body=`<rect width="1600" height="900" fill="#e9d6c3"/><rect y="650" width="1600" height="250" fill="#a8775a"/><rect x="980" y="150" width="380" height="300" rx="10" fill="#273a68" stroke="#fff" stroke-width="18"/><circle cx="1260" cy="230" r="34" fill="#f4edd0"/><rect x="120" y="470" width="620" height="200" rx="30" fill="#7f5fa8"/><rect x="120" y="430" width="200" height="90" rx="30" fill="#efe7f6"/><rect x="820" y="520" width="120" height="150" fill="#6b4c37"/><path d="M860 520l20-120 20 120" fill="#f4d47c"/>`;}
-  else{body=sky('#6d7fc9','#e9b8c9')+`<path d="M0 620q300-140 700-40t900-60v380H0z" fill="#5d6fa8"/><path d="M0 720q500-80 900 0t700-20v200H0z" fill="#3f4f86"/>`;}
-  return enc(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 900" preserveAspectRatio="xMidYMid slice">${body}</svg>`);}
+/* ---------- elenco de exemplo (desenhos em art.js, arquivos em public/example) ---------- */
+import { EXAMPLE, MARKET, spriteKey, bgKey, norm } from './art.js';
 
 /* ---------- state ---------- */
 // Os ids do elenco de exemplo precisam ser iguais em todos os navegadores (o elenco
@@ -64,16 +9,15 @@ function bgArt(name,desc){const t=norm(name+' '+desc);let body='';
 let seq=1,seeding=true;const uid=p=>seeding?p+(seq++).toString(36):p+crypto.randomUUID().replace(/-/g,'').slice(0,12);
 const SLOTS={1:[50],2:[30,70],3:[20,50,80],4:[14,38,62,86],5:[10,30,50,70,90],6:[8,25,42,58,75,92]};
 const MAXCH=6;
-function makeChar(name,desc,color,emotions,src){const look=lookFrom(desc,color||null);
-  return{id:uid('c'),name,desc,color:color||'',source:src||'upload',sprites:emotions.map(([n,d])=>({id:uid('sp'),name:n,desc:d,img:spriteArt(look,n,d)}))};}
-function makeBg(name,desc,src){return{id:uid('b'),name,desc,source:src||'upload',img:bgArt(name,desc)};}
+// Imagens são links (image_key): img/… no KV, example/… e placeholders/… estáticos (veja imgUrl).
+const IMG_BASE=import.meta.env.VITE_IMAGE_BASE||'/';
+const imgUrl=k=>!k?'':/^(data:|https?:)/.test(k)?k:IMG_BASE+k;
+function makeChar(def,src){
+  return{id:uid('c'),name:def.name,desc:def.desc,color:def.color||'',source:src||'example',status:'',error:'',sheetId:'',sprites:def.emotions.map(([n,d],i)=>{const imageKey=spriteKey(def.slug,i);return{id:uid('sp'),name:n,desc:d,imageKey,img:imgUrl(imageKey),status:'',error:''};})};}
+function makeBg(def,src){const imageKey=bgKey(def.slug);return{id:uid('b'),name:def.name,desc:def.desc,source:src||'example',imageKey,img:imgUrl(imageKey),status:'',error:''};}
 
-const lia=makeChar('Lia','Jovem de 19 anos, cabelo ruivo curto, sardas, volta à vila onde cresceu.','#d9467a',[['Neutro','expressão calma, boca reta'],['Feliz','sorriso aberto, olhos fechados de alegria'],['Surpresa','olhos arregalados, boca aberta'],['Triste','sobrancelhas caídas, olhar baixo']]);
-const davi=makeChar('Davi','Amigo de infância de Lia, cabelo preto, pescador, desconfiado de forasteiros.','',[['Neutro','rosto sério'],['Feliz','sorriso largo'],['Bravo','sobrancelhas franzidas, mandíbula tensa']]);
-const cida=makeChar('Dona Cida','Dona do café da vila, cabelo grisalho, conhece todos os segredos do lugar.','#e0b25c',[['Neutro','olhar atento'],['Feliz','sorriso acolhedor']]);
-const bPraia=makeBg('Praia ao entardecer','Praia da vila com sol baixo, mar calmo e um coqueiro.');
-const bFarol=makeBg('Farol à noite','Farol listrado de vermelho sobre a pedra, céu estrelado.');
-const bCafe=makeBg('Café da vila','Interior do café de Dona Cida, prateleiras de potes e janela para o mar.');
+const[lia,davi,cida]=EXAMPLE.characters.map(d=>makeChar(d));
+const[bPraia,bFarol,bCafe]=EXAMPLE.backgrounds.map(d=>makeBg(d));
 const S=(id,title,x,y,bg,chars,kind,speaker,text,extra)=>Object.assign({id,title,x,y,bg,chars,kind,speaker,text,choices:[],next:null},extra||{});
 let state={
   title:'O Farol de Itamaracá',start:'s1',
@@ -86,22 +30,14 @@ let state={
     S('s5','A luz',1080,110,bFarol.id,[],'narration',null,'A luz do farol pisca uma única vez, mesmo sem ninguém lá dentro.'),
   ]};
 const market={
-  characters:[
-    {author:'@marina.ilustra',...makeChar('Yumi','Estudante tímida, cabelo azul longo, uniforme escolar.','#3e6fd3',[['Neutro','olhar tranquilo'],['Feliz','sorriso tímido'],['Surpresa','olhos arregalados'],['Envergonhada','bochechas coradas, olhar desviado']],'marketplace')},
-    {author:'@caio.vn',...makeChar('Capitão Breno','Pirata veterano, barba castanha, chapéu e casaco.','#e8925a',[['Neutro','postura firme'],['Feliz','gargalhada'],['Bravo','olhar furioso']],'marketplace')},
-    {author:'@estudio.lume',...makeChar('Professor Átila','Professor de história, cabelo grisalho, óculos imaginários, fala devagar.','#7fd1a3',[['Neutro','expressão serena'],['Pensativo','olhar distante, desconfiado'],['Surpreso','espanto contido']],'marketplace')},
-  ],
-  backgrounds:[
-    {author:'@estudio.lume',...makeBg('Sala de aula','Sala de aula com quadro verde e carteiras de madeira.','marketplace')},
-    {author:'@marina.ilustra',...makeBg('Floresta encantada','Floresta com vaga-lumes e árvores altas.','marketplace')},
-    {author:'@caio.vn',...makeBg('Rua da cidade à noite','Rua com prédios iluminados à noite.','marketplace')},
-    {author:'@bea.pixel',...makeBg('Quarto aconchegante','Quarto com sofá, abajur e janela para a lua.','marketplace')},
-  ]};
+  characters:MARKET.characters.map(d=>({author:d.author,...makeChar(d,'marketplace')})),
+  backgrounds:MARKET.backgrounds.map(d=>({author:d.author,...makeBg(d,'marketplace')})),
+};
 seeding=false;
 // A história de exemplo vai para o servidor só no "reiniciar demo"; o grafo local
 // começa vazio e é preenchido pela assinatura.
-const SEED={title:state.title,start:state.start,scenes:state.scenes};
-state.scenes=[];state.title='';state.start='';
+const SEED={title:state.title,start:state.start,scenes:state.scenes,characters:state.characters,backgrounds:state.backgrounds};
+state.scenes=[];state.title='';state.start='';state.characters=[];state.backgrounds=[];
 
 
 /* ---------- helpers ---------- */
@@ -137,6 +73,9 @@ function restoreStep(e){const cur=flatOf(state);const inv={flat:cloneFlat(cur),t
   for(const k of e.touched){const[t,id]=k.split(/:(.*)/);
     if(t==='s'){const v=e.flat.scenes.get(id);v?cur.scenes.set(id,{...v}):cur.scenes.delete(id);}
     else if(t==='c'){const v=e.flat.choices.get(id);v?cur.choices.set(id,{...v}):cur.choices.delete(id);}
+    else if(t==='k'){const v=e.flat.chars.get(id);v?cur.chars.set(id,{...v}):cur.chars.delete(id);}
+    else if(t==='p'){const v=e.flat.sprites.get(id);v?cur.sprites.set(id,{...v}):cur.sprites.delete(id);}
+    else if(t==='g'){const v=e.flat.bgs.get(id);v?cur.bgs.set(id,{...v}):cur.bgs.delete(id);}
     else if(k==='title')cur.title=e.flat.title;else if(k==='start')cur.start=e.flat.start;}
   writeFlat(cur);collector=new Set;return inv;}
 function undo(){if(!undoS.length)return;redoS.push(restoreStep(undoS.pop()));afterRestore();}
@@ -209,8 +148,8 @@ const genOf=s=>gens.get(s.id)||(s.aiStatus==='generating'?REMOTE_GEN:null);
 function stageMini(s){const bg=bgById(s.bg);const n=s.chars.length,pos=SLOTS[n]||[];const w=n>3?Math.max(18,100/n*1.25):30;const g=genOf(s);
   if(g)return`<div class="stage-mini"><div class="gen-veil"><span class="skel" style="width:72%"></span><span class="skel" style="width:54%"></span><span class="skel" style="width:63%"></span></div></div>`;
   const rv=reveal.has(s.id)?ago(reveal.get(s.id)):null;const rvOn=rv!==null&&rv<1600;
-  let h=bg?`<img class="bgimg" src="${bg.img}" alt="" ${rvOn?`style="animation-delay:-${rv}ms"`:''}>`:`<div class="nobg">sem background</div>`;
-  s.chars.forEach((cc,i)=>{const c=charById(cc.c),sp=spriteOf(c,cc.s);if(!sp)return;h+=`<img class="pchar" style="left:${pos[i]}%;max-width:${w}%;${rvOn?`animation-delay:${180+i*110-rv}ms`:''}" src="${sp.img}" alt="">`;});
+  let h=bg&&bg.img?`<img class="bgimg" src="${bg.img}" alt="" ${rvOn?`style="animation-delay:-${rv}ms"`:''}>`:`<div class="nobg">sem background</div>`;
+  s.chars.forEach((cc,i)=>{const c=charById(cc.c),sp=spriteOf(c,cc.s);if(!sp||!sp.img)return;h+=`<img class="pchar" style="left:${pos[i]}%;max-width:${w}%;${rvOn?`animation-delay:${180+i*110-rv}ms`:''}" src="${sp.img}" alt="">`;});
   return`<div class="stage-mini${rvOn?' reveal':''}">${h}</div>`;}
 function rowFresh(id){const t=freshRows.get(id);if(t==null)return'';const a=ago(t);if(a>700){freshRows.delete(id);return'';}return` fresh" style="animation-delay:-${a}ms`;}
 function nodeHTML(s,ws,reach,lnk,incoming){const g=genOf(s);const isStart=state.start===s.id;const exp=expanded===s.id&&!g;const avail=state.characters.filter(c=>!s.chars.some(x=>x.c===c.id));
@@ -231,13 +170,13 @@ function nodeHTML(s,ws,reach,lnk,incoming){const g=genOf(s);const isStart=state.
     const single=!nOpts?`<div class="orow c"><span class="nextlabel">${s.next?'continuar → '+esc(scene(s.next)?.title||''):'continuar'}</span><button class="port out ${portCls(s.id,'',lnk)}" data-out="${s.id}" data-ch="" aria-label="Saída única de ${esc(s.title)}"></button></div>`:'';
     return`<div class="${cls.join(' ')}" data-id="${s.id}" style="${style}">${head}<div class="mid"><div class="sec">${stageMini(s)}${lkText?lockBadge(lkText):''}<div class="sum">${sum}</div></div></div>${opts}${single}</div>`;}
   const full=s.chars.length>=MAXCH;
-  const cast=s.chars.map((cc,i)=>{const c=charById(cc.c);if(!c)return'';const sp=spriteOf(c,cc.s);return`<div class="cast-row${rowFresh('cast:'+s.id+':'+c.id)}"><img src="${sp?sp.img:''}" alt=""><span class="cast-name" style="color:${c.color||'inherit'}" title="${esc(c.name)}">${esc(c.name)}<span class="slot">${i+1}</span></span><select class="msel" data-act="sprite" data-i="${i}" aria-label="Sprite de ${esc(c.name)}">${c.sprites.map(p=>`<option value="${p.id}"${p.id===cc.s?' selected':''}>${esc(p.name)}</option>`).join('')}</select><button class="iconbtn sm" data-act="rmchar" data-i="${i}" aria-label="Tirar ${esc(c.name)} da cena"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M7 7l10 10M17 7L7 17"/></svg></button></div>`;}).join('');
-  const add=`<select class="msel" data-act="addchar" ${full||!avail.length?'disabled':''} aria-label="Adicionar personagem"><option value="">${full?'limite de 6 personagens':avail.length?`+ personagem  (${s.chars.length}/6)`:'todo o elenco já está na cena'}</option>${avail.map(c=>`<option value="${c.id}"${c.sprites.length?'':' disabled'}>${esc(c.name)}${c.sprites.length?'':' · sem sprites'}</option>`).join('')}</select>`;
+  const cast=s.chars.map((cc,i)=>{const c=charById(cc.c);if(!c)return'';const sp=spriteOf(c,cc.s);return`<div class="cast-row${rowFresh('cast:'+s.id+':'+c.id)}"><img src="${sp?sp.img:''}" alt=""><span class="cast-name" style="color:${c.color||'inherit'}" title="${esc(c.name)}">${esc(c.name)}<span class="slot">${i+1}</span></span><select class="msel" data-act="sprite" data-i="${i}" aria-label="Sprite de ${esc(c.name)}">${c.sprites.filter(p=>p.img||p.id===cc.s).map(p=>`<option value="${p.id}"${p.id===cc.s?' selected':''}>${esc(p.name)}</option>`).join('')}</select><button class="iconbtn sm" data-act="rmchar" data-i="${i}" aria-label="Tirar ${esc(c.name)} da cena"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M7 7l10 10M17 7L7 17"/></svg></button></div>`;}).join('');
+  const add=`<select class="msel" data-act="addchar" ${full||!avail.length?'disabled':''} aria-label="Adicionar personagem"><option value="">${full?'limite de 6 personagens':avail.length?`+ personagem  (${s.chars.length}/6)`:'todo o elenco já está na cena'}</option>${avail.map(c=>{const ok=c.sprites.some(p=>p.img);return`<option value="${c.id}"${ok?'':' disabled'}>${esc(c.name)}${ok?'':busy(c)||c.sprites.some(busy)?' · gerando':' · sem sprites'}</option>`;}).join('')}</select>`;
   const speaker=s.kind==='dialogue'?`<div class="speaker"><span class="lbl">quem fala</span><select class="msel" data-act="speaker" aria-label="Quem fala">${s.chars.map(cc=>{const c=charById(cc.c);if(!c)return'';return`<option value="${c.id}"${c.id===s.speaker?' selected':''}>${esc(c.name)}</option>`}).join('')}</select></div>`:'';
   const opts=s.choices.map((ch,i)=>{const pc=portCls(s.id,ch.id,lnk);const og=ch.gen?' optgen':'';const lk=lockOf('choice:'+ch.id+':label');return`<div class="orow${og}${ch.target?'':' draft'}${rowFresh('opt:'+ch.id)}"><span class="onum">${i+1}</span><input class="oin${lk?' locked':''}" data-act="clabel" data-i="${i}" value="${esc(ch.label)}" placeholder="Texto da ação" aria-label="Ação do jogador"${lk?` readonly title="${esc(lk.name)} está escrevendo…" style="--lc:${lk.color}"`:''}><button class="iconbtn sm" data-act="rmchoice" data-i="${i}" aria-label="Remover ação"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M7 7l10 10M17 7L7 17"/></svg></button><button class="port out ${pc}${ch.target?'':' draft'}" data-out="${s.id}" data-ch="${ch.id}" aria-label="Saída da ação ${esc(ch.label)}${ch.target?'':', sem destino'}"></button></div>`;}).join('');
   const single=!nOpts?`<div class="orow"><span class="nextlabel">${s.next?'continuar → '+esc(scene(s.next)?.title||''):'continuar'}</span><button class="port out ${portCls(s.id,'',lnk)}" data-out="${s.id}" data-ch="" aria-label="Saída única de ${esc(s.title)}"></button></div>`:'';
   return`<div class="${cls.join(' ')}" data-id="${s.id}" style="${style}">${head}
-  <div class="mid"><div class="sec">${stageMini(s)}<select class="msel" data-act="bg" aria-label="Background"><option value="">sem background</option>${state.backgrounds.map(b=>`<option value="${b.id}"${b.id===s.bg?' selected':''}>${esc(b.name)}</option>`).join('')}</select></div>
+  <div class="mid"><div class="sec">${stageMini(s)}<select class="msel" data-act="bg" aria-label="Background"><option value="">sem background</option>${state.backgrounds.filter(b=>b.img||b.id===s.bg).map(b=>`<option value="${b.id}"${b.id===s.bg?' selected':''}>${esc(b.name)}</option>`).join('')}</select></div>
   <div class="sec grow-in">${cast}${add}</div>
   <div class="sec grow-in"><div class="seg" role="group" aria-label="Tipo de texto"><button data-act="kind" data-v="narration" aria-pressed="${s.kind==='narration'}">Narração</button><button data-act="kind" data-v="dialogue" aria-pressed="${s.kind==='dialogue'}">Fala</button></div>${speaker}${lkText?lockBadge(lkText):''}<textarea class="ntext${s.kind==='narration'?' narr':''}${lkText?' locked':''}" data-act="text" placeholder="${s.kind==='narration'?'Descreva o ambiente…':'O que o personagem diz…'}" aria-label="Texto da cena"${lkText?` readonly style="--lc:${lkText.color}"`:''}>${esc(s.text)}</textarea></div></div>
   ${opts}${single}
@@ -368,11 +307,8 @@ function deleteScenes(ids){ids=ids.filter(id=>{if(id===state.start){toast('A cen
 
 /* ---------- IA (procedures e fila do worker) ---------- */
 const pick=a=>a[Math.floor(Math.random()*a.length)];
-// Imagens geradas: image_key relativo à base pública (R2 no deploy; /placeholders no modo mock).
-const IMG_BASE=import.meta.env.VITE_IMAGE_BASE||'/';
-const imgUrl=k=>/^(data:|https?:)/.test(k)?k:IMG_BASE+k;
 // No spike o elenco e os backgrounds ficam no cliente, então vão como contexto para a IA.
-function aiContext(){return{characters:state.characters.map(c=>({id:c.id,name:c.name,desc:c.desc,sprites:c.sprites.map(s=>({id:s.id,name:s.name,desc:s.desc}))})),backgrounds:state.backgrounds.map(b=>({id:b.id,name:b.name,desc:b.desc}))};}
+function aiContext(){return{characters:state.characters.map(c=>({id:c.id,name:c.name,desc:c.desc,sprites:c.sprites.filter(s=>s.img).map(s=>({id:s.id,name:s.name,desc:s.desc}))})),backgrounds:state.backgrounds.filter(b=>b.img).map(b=>({id:b.id,name:b.name,desc:b.desc}))};}
 const AI_ERRS={AI_DISABLED:'a IA está desabilitada neste servidor.',RATE_LIMITED:'limite de pedidos de IA por minuto atingido. Tente de novo em instantes.',AI_PROVIDER_ERROR:'o provedor de IA falhou. Tente de novo.',AI_KEY_INVALID:'a chave do provedor de IA foi recusada. Avise quem mantém o servidor.',TIMEOUT:'o provedor demorou demais. Tente de novo.',AI_INVALID_OUTPUT:'a resposta da IA não respeitou as regras da cena.',WORKER_RESTARTED:'o serviço de IA reiniciou no meio do pedido. Tente de novo.',NOT_FOUND:'a cena de origem não existe mais.',INVALID:'pedido inválido.',OFFLINE:'sem conexão com o servidor.'};
 function aiMessage(err){const m=String(err&&err.message||err);const c=Object.keys(AI_ERRS).find(k=>m.includes(k));return c?AI_ERRS[c]:m.slice(0,120);}
 // Procedures devolvem {ok, ...} ou {error}.
@@ -403,7 +339,7 @@ nodesEl.addEventListener('change',e=>{const n=e.target.closest('.node');if(!n)re
   if(a==='bg'){pushUndo();s.bg=v||null;if(v){reveal.set(s.id,performance.now());setTimeout(()=>reveal.delete(s.id),1700);}refresh();}
   else if(a==='sprite'){pushUndo();s.chars[+e.target.dataset.i].s=v;refresh();}
   else if(a==='speaker'){pushUndo();s.speaker=v;refresh();}
-  else if(a==='addchar'&&v){if(s.chars.length>=MAXCH){toast('Uma cena tem no máximo 6 personagens.','err');return;}const c=charById(v);pushUndo();s.chars.push({c:c.id,s:c.sprites[0].id});freshRows.set('cast:'+s.id+':'+c.id,performance.now());reveal.set(s.id,performance.now());setTimeout(()=>reveal.delete(s.id),1700);refresh();}});
+  else if(a==='addchar'&&v){if(s.chars.length>=MAXCH){toast('Uma cena tem no máximo 6 personagens.','err');return;}const c=charById(v);const sp0=c&&c.sprites.find(p=>p.img);if(!sp0)return;pushUndo();s.chars.push({c:c.id,s:sp0.id});freshRows.set('cast:'+s.id+':'+c.id,performance.now());reveal.set(s.id,performance.now());setTimeout(()=>reveal.delete(s.id),1700);refresh();}});
 nodesEl.addEventListener('click',e=>{const b=e.target.closest('[data-act]');const n=e.target.closest('.node');if(!b||!n)return;const s=scene(n.dataset.id);const a=b.dataset.act;
   if(a==='rmchar'){const i=+b.dataset.i;if(s.kind==='dialogue'&&s.speaker===s.chars[i].c){toast(`${charById(s.chars[i].c).name} é quem fala nesta cena. Troque quem fala ou mude para Narração antes de tirar.`,'err');nodeShake(s.id);return;}pushUndo();s.chars.splice(i,1);refresh();}
   else if(a==='kind'){const v=b.dataset.v;if(v===s.kind)return;if(v==='dialogue'&&!s.chars.length){toast('Para criar uma fala, adicione antes um personagem à cena.','err');nodeShake(s.id);return;}pushUndo();s.kind=v;s.speaker=v==='dialogue'?s.chars[0].c:null;refresh();}
@@ -545,50 +481,92 @@ mqNarrow.addEventListener('change',()=>{$('#rail').classList.remove('open');$('#
 appEl.classList.add('no-anim');appEl.classList.toggle('rail-off',!panels.rail);appEl.classList.toggle('chat-off',!panels.chat);syncToggles();requestAnimationFrame(()=>requestAnimationFrame(()=>appEl.classList.remove('no-anim')));
 
 /* ---------- left rail ---------- */
-let railTab='chars';const openCards=new Set;const freshCards=new Map;
+let railTab='chars';const openCards=new Set;const freshCards=new Map;const freshSprites=new Map;
 $('#tabChars').onclick=()=>{railTab='chars';renderRail();};$('#tabBgs').onclick=()=>{railTab='bgs';renderRail();};
 function usage(kind,id){return state.scenes.filter(s=>kind==='bg'?s.bg===id:kind==='char'?s.chars.some(c=>c.c===id):s.chars.some(c=>c.s===id)).map(s=>s.title);}
 const X='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M7 7l10 10M17 7L7 17"/></svg>';
+const SPARK13=()=>SPARK.replace('<svg','<svg style="width:13px;height:13px"');
 function cardFresh(id,src){const t=freshCards.get(id);if(t==null)return'';const a=ago(t);if(a>1400){freshCards.delete(id);return'';}return` fresh${src==='ai'?' ai':''}" style="animation-delay:-${Math.min(a,500)}ms`;}
-function renderRail(){$('#tabChars').setAttribute('aria-selected',railTab==='chars');$('#tabBgs').setAttribute('aria-selected',railTab==='bgs');$('#nChars').textContent=state.characters.length;$('#nBgs').textContent=state.backgrounds.length;
+const readySprites=c=>c.sprites.filter(p=>p.img);
+const busy=x=>x.status==='generating'||x.status==='pending';
+// Imagem de um sprite ou background, ou o estado da geração no lugar dela.
+function artOf(x,cls,alt){if(x.img)return`<img class="${cls}" src="${esc(x.img)}" alt="${esc(alt||'')}">`;
+  if(busy(x))return`<span class="${cls} artgen" title="${x.status==='pending'?'Esperando o charsheet':'Gerando…'}"><span class="spinner"></span></span>`;
+  return`<span class="${cls} artgen failed" title="${esc(aiMessage(x.error||'falhou'))}">!</span>`;}
+function genLine(x,what,id){if(busy(x))return`<div class="genline"><span class="spinner"></span>${x.status==='pending'?'esperando o charsheet':'gerando '+what+'…'}</div>`;
+  if(x.status==='failed')return`<div class="genline failed"><span>${esc(what)} falhou: ${esc(aiMessage(x.error))}</span><button class="addbtn ai" data-retry="${id}">tentar de novo</button></div>`;return'';}
+function charSub(c){if(c.status==='generating')return'gerando charsheet…';if(c.status==='failed')return'charsheet falhou';
+  const n=readySprites(c).length,g=c.sprites.filter(busy).length;
+  return`${n} sprite${n===1?'':'s'}${g?` · ${g} gerando`:''}${c.source==='marketplace'?' · marketplace':c.source==='ai'?' · gerado por IA':''}`;}
+function spriteRow(s){const t=freshSprites.get(s.id);const fr=t!=null&&ago(t)<1400?' fresh':'';
+  return`<div class="sprite${fr}" data-sp="${s.id}">${artOf(s,'',s.name)}<div class="sprite-f"><input class="inp" data-sf="name" value="${esc(s.name)}" placeholder="Nome da emoção" aria-label="Nome do sprite"><input class="inp" data-sf="desc" value="${esc(s.desc)}" placeholder="Descrição para a IA" aria-label="Descrição do sprite">${genLine(s,'a pose','sp:'+s.id)}</div><button class="iconbtn sm" data-sdel aria-label="Excluir sprite">${X}</button></div>`;}
+// Com IA: pose nova a partir do charsheet; sem charsheet (personagem enviado), gera o charsheet antes.
+function poseButtons(c){const up=`<label class="addbtn" style="display:inline-flex;align-items:center">+ pose (upload)<input type="file" accept="image/png,image/jpeg,image/webp" data-upsprite hidden></label>`;
+  const ai=c.sheetId||c.status==='generating'?`<button class="addbtn ai" data-aipose>${SPARK13()}+ pose com IA</button>`
+    :c.status==='failed'?'':`<button class="addbtn ai" data-gensheet title="Front e side do personagem, gerados a partir da descrição. As poses com IA usam esse charsheet.">${SPARK13()}gerar charsheet com IA</button>`;
+  return`<div class="row" style="flex-wrap:wrap">${up}${ai}</div>`;}
+function renderRail(){railDirty=false;$('#tabChars').setAttribute('aria-selected',railTab==='chars');$('#tabBgs').setAttribute('aria-selected',railTab==='bgs');$('#nChars').textContent=state.characters.length;$('#nBgs').textContent=state.backgrounds.length;
   const acts=$('#railActions'),body=$('#railBody');
   if(railTab==='chars'){
-    acts.innerHTML=`<button class="addbtn" id="newChar">+ novo (upload)</button><button class="btn sm violet" id="genChar">${SPARK.replace('<svg','<svg style="width:13px;height:13px"')}Gerar com IA</button><button class="btn sm" id="mkChar">Marketplace</button>`;
-    body.innerHTML=state.characters.length?state.characters.map(c=>{const o=openCards.has(c.id);return`<div class="card${cardFresh(c.id,c.source)}" data-c="${c.id}"><div class="card-row" data-toggle><img class="avatar" src="${c.sprites[0]?.img||''}" alt=""><div style="min-width:0;flex:1"><div class="card-name"><span class="swatch" style="background:${c.color||'transparent'}"></span><span style="color:${c.color||'inherit'}">${esc(c.name)}</span></div><div class="card-sub">${c.sprites.length} sprite${c.sprites.length===1?'':'s'}${c.source==='marketplace'?' · marketplace':c.source==='ai'?' · gerado por IA':''}</div></div><span class="chev">${o?'−':'+'}</span></div>
-      ${o?`<div class="card-edit"><label class="field"><span class="lbl">nome</span><input class="inp" data-cf="name" value="${esc(c.name)}"></label>
+    acts.innerHTML=`<button class="addbtn" id="newChar">+ novo (upload)</button><button class="btn sm violet" id="genChar">${SPARK13()}Gerar com IA</button><button class="btn sm" id="mkChar">Marketplace</button>`;
+    body.innerHTML=state.characters.length?state.characters.map(c=>{const o=openCards.has(c.id);const av=readySprites(c)[0];return`<div class="card${cardFresh(c.id,c.source)}" data-c="${c.id}"><div class="card-row" data-toggle>${av?`<img class="avatar" src="${esc(av.img)}" alt="">`:artOf({status:c.status==='failed'?'failed':'generating',error:c.error},'avatar')}<div style="min-width:0;flex:1"><div class="card-name"><span class="swatch" style="background:${c.color||'transparent'}"></span><span style="color:${c.color||'inherit'}">${esc(c.name)}</span></div><div class="card-sub">${charSub(c)}</div></div><span class="chev">${o?'−':'+'}</span></div>
+      ${o?`<div class="card-edit">${genLine(c,'o charsheet','c:'+c.id)}<label class="field"><span class="lbl">nome</span><input class="inp" data-cf="name" value="${esc(c.name)}"></label>
       <div class="field"><span class="lbl">cor do nome · opcional</span><div class="row"><label class="row" style="gap:6px;font-size:12.5px;color:var(--text-2)"><input type="checkbox" data-cf="hascolor"${c.color?' checked':''}> usar cor</label><input type="color" data-cf="color" value="${c.color||'#f2a541'}"${c.color?'':' disabled'} aria-label="Cor" style="width:34px;height:24px;border:0;background:none;padding:0"><span style="font-weight:600;color:${c.color||'var(--text)'}">${esc(c.name)}</span></div></div>
       <label class="field"><span class="lbl">descrição</span><textarea class="inp" data-cf="desc">${esc(c.desc)}</textarea></label>
-      <div class="field"><span class="lbl">sprites · emoções</span>${c.sprites.map(s=>`<div class="sprite" data-sp="${s.id}"><img src="${s.img}" alt="${esc(s.name)}"><div class="sprite-f"><input class="inp" data-sf="name" value="${esc(s.name)}" placeholder="Nome da emoção" aria-label="Nome do sprite"><input class="inp" data-sf="desc" value="${esc(s.desc)}" placeholder="Descrição para a IA" aria-label="Descrição do sprite"></div><button class="iconbtn sm" data-sdel aria-label="Excluir sprite">${X}</button></div>`).join('')||'<div class="empty">Sem sprites. Envie ao menos um para usar este personagem em cenas.</div>'}
-      <label class="addbtn" style="align-self:flex-start;display:inline-flex;align-items:center">+ sprite (upload)<input type="file" accept="image/*" data-upsprite hidden></label></div>
+      <div class="field"><span class="lbl">sprites · emoções</span>${c.sprites.map(spriteRow).join('')||'<div class="empty">Sem sprites. Envie ao menos um para usar este personagem em cenas.</div>'}
+      ${poseButtons(c)}</div>
       <div class="row"><button class="btn sm" data-pub>Publicar no marketplace</button><button class="btn sm danger" data-cdel>Excluir</button></div></div>`:''}</div>`;}).join(''):'<div class="empty">Nenhum personagem. Envie sprites, gere com IA ou copie do Marketplace.</div>';
-    $('#newChar').onclick=()=>{pushUndo();const c={id:uid('c'),name:'Novo personagem',desc:'',color:'',source:'upload',sprites:[]};state.characters.push(c);openCards.add(c.id);freshCards.set(c.id,performance.now());renderRail();refresh();};
+    $('#newChar').onclick=()=>{pushUndo();const c={id:uid('c'),name:'Novo personagem',desc:'',color:'',source:'upload',status:'',error:'',sheetId:'',sprites:[]};state.characters.push(c);openCards.add(c.id);freshCards.set(c.id,performance.now());renderRail();refresh();};
     $('#genChar').onclick=genCharModal;$('#mkChar').onclick=()=>marketModal('chars');
   }else{
-    acts.innerHTML=`<label class="addbtn" style="display:inline-flex;align-items:center">+ upload<input type="file" accept="image/*" id="upBg" hidden></label><button class="btn sm violet" id="genBg">${SPARK.replace('<svg','<svg style="width:13px;height:13px"')}Gerar com IA</button><button class="btn sm" id="mkBg">Marketplace</button>`;
-    body.innerHTML=state.backgrounds.length?state.backgrounds.map(b=>{const o=openCards.has(b.id);return`<div class="card${cardFresh(b.id,b.source)}" data-b="${b.id}"><div class="card-row" data-toggle><img class="bg-thumb" src="${b.img}" alt=""><div style="min-width:0;flex:1"><div class="card-name"><span>${esc(b.name)}</span></div><div class="card-sub">${usage('bg',b.id).length} cena(s)${b.source==='marketplace'?' · marketplace':b.source==='ai'?' · gerado por IA':''}</div></div><span class="chev">${o?'−':'+'}</span></div>
-      ${o?`<div class="card-edit"><img src="${b.img}" alt="" style="width:100%;border-radius:8px;aspect-ratio:16/9;object-fit:cover"><label class="field"><span class="lbl">nome</span><input class="inp" data-bf="name" value="${esc(b.name)}"></label><label class="field"><span class="lbl">descrição</span><textarea class="inp" data-bf="desc">${esc(b.desc)}</textarea></label><label class="addbtn" style="align-self:flex-start;display:inline-flex;align-items:center">trocar imagem<input type="file" accept="image/*" data-upbg hidden></label><div class="row"><button class="btn sm" data-pub>Publicar no marketplace</button><button class="btn sm danger" data-bdel>Excluir</button></div></div>`:''}</div>`;}).join(''):'<div class="empty">Nenhum background. Envie uma imagem, gere com IA ou copie do Marketplace.</div>';
-    $('#upBg').onchange=e=>readFile(e.target.files[0],img=>{pushUndo();const b={id:uid('b'),name:(e.target.files[0].name||'Background').replace(/\.[^.]+$/,''),desc:'',source:'upload',img};state.backgrounds.push(b);openCards.add(b.id);freshCards.set(b.id,performance.now());renderRail();refresh();toast('Background enviado');});
+    acts.innerHTML=`<label class="addbtn" style="display:inline-flex;align-items:center">+ upload<input type="file" accept="image/png,image/jpeg,image/webp" id="upBg" hidden></label><button class="btn sm violet" id="genBg">${SPARK13()}Gerar com IA</button><button class="btn sm" id="mkBg">Marketplace</button>`;
+    body.innerHTML=state.backgrounds.length?state.backgrounds.map(b=>{const o=openCards.has(b.id);return`<div class="card${cardFresh(b.id,b.source)}" data-b="${b.id}"><div class="card-row" data-toggle>${artOf(b,'bg-thumb')}<div style="min-width:0;flex:1"><div class="card-name"><span>${esc(b.name)}</span></div><div class="card-sub">${busy(b)?'gerando…':b.status==='failed'?'falhou':usage('bg',b.id).length+' cena(s)'}${b.source==='marketplace'?' · marketplace':b.source==='ai'?' · gerado por IA':''}</div></div><span class="chev">${o?'−':'+'}</span></div>
+      ${o?`<div class="card-edit">${b.img?`<img src="${esc(b.img)}" alt="" style="width:100%;border-radius:8px;aspect-ratio:16/9;object-fit:cover">`:''}${genLine(b,'o background','b:'+b.id)}<label class="field"><span class="lbl">nome</span><input class="inp" data-bf="name" value="${esc(b.name)}"></label><label class="field"><span class="lbl">descrição</span><textarea class="inp" data-bf="desc">${esc(b.desc)}</textarea></label><label class="addbtn" style="align-self:flex-start;display:inline-flex;align-items:center">${b.img?'trocar imagem':'enviar imagem'}<input type="file" accept="image/png,image/jpeg,image/webp" data-upbg hidden></label><div class="row"><button class="btn sm" data-pub>Publicar no marketplace</button><button class="btn sm danger" data-bdel>Excluir</button></div></div>`:''}</div>`;}).join(''):'<div class="empty">Nenhum background. Envie uma imagem, gere com IA ou copie do Marketplace.</div>';
+    $('#upBg').onchange=e=>{const f=e.target.files[0];uploadImage(f).then(key=>{pushUndo();const b={id:uid('b'),name:(f.name||'Background').replace(/\.[^.]+$/,''),desc:'',source:'upload',imageKey:key,img:imgUrl(key),status:'',error:''};state.backgrounds.push(b);openCards.add(b.id);freshCards.set(b.id,performance.now());renderRail();refresh();toast('Background enviado');},uploadFailed);};
     $('#genBg').onclick=genBgModal;$('#mkBg').onclick=()=>marketModal('bgs');
   }}
-function readFile(f,cb){if(!f)return;const r=new FileReader();r.onload=()=>cb(r.result);r.readAsDataURL(f);}
+// Atualização vinda do servidor com alguém digitando no painel: redesenha quando o campo perde o foco.
+let railDirty=false;
+function renderRailSoon(){const a=document.activeElement;if(a&&railBody.contains(a)&&a.matches('input:not([type=checkbox]):not([type=file]):not([type=color]),textarea')){railDirty=true;return;}renderRail();}
+// Envio de imagem: vai para o KV pelas Pages Functions e volta só a chave (image_key) que o banco guarda.
+const UPLOAD_TYPES=['image/png','image/jpeg','image/webp'],UPLOAD_MAX=8*1024*1024;
+const UPLOAD_ERRS={FORBIDDEN:'entre de novo para enviar imagens.',TOO_LARGE:'a imagem passa de 8 MB.',UNSUPPORTED_TYPE:'use PNG, JPEG ou WebP.',NO_STORAGE:'o armazenamento de imagens não está configurado neste servidor.'};
+async function uploadImage(f){if(!f)throw new Error('EMPTY');if(!UPLOAD_TYPES.includes(f.type))throw new Error('UNSUPPORTED_TYPE');if(f.size>UPLOAD_MAX)throw new Error('TOO_LARGE');
+  const r=await fetch('/api/upload',{method:'POST',body:f,headers:{'Content-Type':f.type},credentials:'same-origin'}).catch(()=>{throw new Error('OFFLINE');});
+  const body=await r.json().catch(()=>({}));if(!r.ok||!body.key)throw new Error(body.error||'HTTP_'+r.status);return body.key;}
+const uploadFailed=err=>{const m=errMsg(err);toast('Não foi possível enviar a imagem: '+(UPLOAD_ERRS[m]||AI_ERRS[m]||m),'err');};
+// Pedidos de geração do elenco: as linhas aparecem já no painel (gerando) e o resultado chega pela tabela.
+const CAST_ERRS={NO_SHEET:'o personagem ainda não tem charsheet.',BUSY:'já está gerando.'};
+const castFailed=what=>err=>{const m=errMsg(err);const c=Object.keys(CAST_ERRS).find(k=>m.includes(k));toast(`Não foi possível ${what}: `+(c?CAST_ERRS[c]:aiMessage(err)),'err');};
+function retryCast(ref){const[t,id]=ref.split(/:(.*)/);const target={c:'character',sp:'sprite',b:'background'}[t];
+  conn.reducers.retryGeneration({storyId,target,id,jobId:uid('j')}).catch(castFailed('gerar de novo'));}
+function askPose(c){askModal(`<label class="field"><span class="lbl">nome da emoção</span><input class="inp" name="n" maxlength="80" placeholder="ex.: Pensativa" autocomplete="off"></label><label class="field"><span class="lbl">descrição da pose</span><input class="inp" name="d" maxlength="300" placeholder="ex.: mão no queixo, olhar para o lado" autocomplete="off"></label><div class="hint">A pose é gerada a partir do charsheet de ${esc(c.name)} e aparece no painel quando ficar pronta.</div>`,{title:'Pose nova com IA',ok:'Gerar pose'},
+    w=>{const n=w.querySelector('[name=n]').value.trim();return n?{n,d:w.querySelector('[name=d]').value.trim()}:null;})
+  .then(v=>{if(!v)return;conn.reducers.addPose({storyId,characterId:c.id,spriteId:uid('sp'),jobId:uid('j'),name:v.n,desc:v.d}).then(()=>openCards.add(c.id),castFailed('gerar a pose'));});}
 const railBody=$('#railBody');
+railBody.addEventListener('focusout',()=>setTimeout(()=>{if(railDirty)renderRailSoon();},0));
 railBody.addEventListener('click',e=>{const card=e.target.closest('.card');if(!card)return;const cid=card.dataset.c,bid=card.dataset.b;
   if(e.target.closest('[data-toggle]')){const k=cid||bid;openCards.has(k)?openCards.delete(k):openCards.add(k);renderRail();return;}
   if(cid){const c=charById(cid);
     if(e.target.closest('[data-cdel]')){const u=usage('char',cid);if(u.length){toast(`Não dá para excluir ${c.name}: está em ${u.map(t=>'“'+t+'”').join(', ')}. Tire das cenas antes.`,'err');return;}pushUndo();state.characters=state.characters.filter(x=>x.id!==cid);renderRail();refresh();toast('Personagem excluído');}
     else if(e.target.closest('[data-sdel]')){const spid=e.target.closest('[data-sp]').dataset.sp;const u=usage('sprite',spid);if(u.length){toast(`Sprite em uso em ${u.map(t=>'“'+t+'”').join(', ')}. Troque o sprite nessas cenas antes.`,'err');return;}pushUndo();c.sprites=c.sprites.filter(s=>s.id!==spid);renderRail();refresh();}
+    else if(e.target.closest('[data-aipose]'))askPose(c);
+    else if(e.target.closest('[data-gensheet]'))conn.reducers.retryGeneration({storyId,target:'character',id:c.id,jobId:uid('j')}).catch(castFailed('gerar o charsheet'));
+    else if(e.target.closest('[data-retry]'))retryCast(e.target.closest('[data-retry]').dataset.retry);
     else if(e.target.closest('[data-pub]'))publish('chars',c);}
   if(bid){const b=bgById(bid);
     if(e.target.closest('[data-bdel]')){const u=usage('bg',bid);if(u.length){toast(`Não dá para excluir “${b.name}”: está em ${u.map(t=>'“'+t+'”').join(', ')}.`,'err');return;}pushUndo();state.backgrounds=state.backgrounds.filter(x=>x.id!==bid);renderRail();refresh();toast('Background excluído');}
+    else if(e.target.closest('[data-retry]'))retryCast(e.target.closest('[data-retry]').dataset.retry);
     else if(e.target.closest('[data-pub]'))publish('bgs',b);}});
 railBody.addEventListener('focusin',e=>{if(e.target.matches('input:not([type=checkbox]):not([type=file]),textarea'))pendingSnap=snapStr();});
 railBody.addEventListener('input',e=>{const card=e.target.closest('.card');if(!card)return;const t=e.target;
   if(card.dataset.c){const c=charById(card.dataset.c);if(t.dataset.cf==='name'||t.dataset.cf==='desc')c[t.dataset.cf]=t.value;if(t.dataset.cf==='color')c.color=t.value;const sp=t.closest('[data-sp]');if(sp&&t.dataset.sf)c.sprites.find(s=>s.id===sp.dataset.sp)[t.dataset.sf]=t.value;}
-  else if(card.dataset.b){const b=bgById(card.dataset.b);if(t.dataset.bf)b[t.dataset.bf]=t.value;}});
+  else if(card.dataset.b){const b=bgById(card.dataset.b);if(t.dataset.bf)b[t.dataset.bf]=t.value;}
+  syncSoon();});
 railBody.addEventListener('change',e=>{const card=e.target.closest('.card');if(!card)return;const t=e.target;
   if(t.dataset.cf==='hascolor'){pushUndo();const c=charById(card.dataset.c);c.color=t.checked?(card.querySelector('[data-cf=color]').value||'#f2a541'):'';renderRail();refresh();return;}
-  if(t.matches('[data-upsprite]')){const c=charById(card.dataset.c);readFile(t.files[0],img=>{pushUndo();c.sprites.push({id:uid('sp'),name:'Nova emoção',desc:'',img});renderRail();refresh();toast('Sprite enviado. Dê um nome e uma descrição a ele.');});return;}
-  if(t.matches('[data-upbg]')){const b=bgById(card.dataset.b);readFile(t.files[0],img=>{pushUndo();b.img=img;renderRail();refresh();});return;}
+  if(t.matches('[data-upsprite]')){const cid=card.dataset.c;uploadImage(t.files[0]).then(key=>{const c=charById(cid);if(!c)return;pushUndo();c.sprites.push({id:uid('sp'),name:'Nova emoção',desc:'',imageKey:key,img:imgUrl(key),status:'',error:''});renderRail();refresh();toast('Sprite enviado. Dê um nome e uma descrição a ele.');},uploadFailed);return;}
+  if(t.matches('[data-upbg]')){const bid=card.dataset.b;uploadImage(t.files[0]).then(key=>{const b=bgById(bid);if(!b)return;pushUndo();b.imageKey=key;b.img=imgUrl(key);renderRail();refresh();},uploadFailed);return;}
   if(pendingSnap&&pendingSnap!==snapStr())pushUndo(pendingSnap);pendingSnap=null;renderRail();refresh();});
 function publish(kind,item){const copy=JSON.parse(JSON.stringify(item));copy.id=uid(kind==='chars'?'c':'b');copy.author='@você';copy.source='marketplace';if(kind==='chars')copy.sprites.forEach(s=>s.id=uid('sp'));market[kind==='chars'?'characters':'backgrounds'].unshift(copy);toast(`“${item.name}” publicado no marketplace`);}
 
@@ -614,38 +592,31 @@ function marketModal(tab){const draw=()=>{const items=tab==='chars'?market.chara
   w.querySelectorAll('[data-mt]').forEach(b=>b.onclick=()=>{tab=b.dataset.mt;draw();});
   w.querySelectorAll('[data-add]').forEach(b=>b.onclick=()=>{const it=JSON.parse(JSON.stringify(items[+b.dataset.add]));delete it.author;pushUndo();it.id=uid(tab==='chars'?'c':'b');it.source='marketplace';if(tab==='chars'){it.sprites.forEach(s=>s.id=uid('sp'));state.characters.push(it);railTab='chars';}else{state.backgrounds.push(it);railTab='bgs';}freshCards.set(it.id,performance.now());renderRail();refresh();toast(`“${it.name}” incluído na história`);b.textContent='Incluído ✓';b.disabled=true;const r=b.getBoundingClientRect();screenBurst(r.left+r.width/2,r.top+r.height/2);});};draw();}
 function screenBurst(x,y,ai){const b=document.createElement('div');b.className='burst '+(ai?'ai':'plain');b.style.position='fixed';b.style.left=x+'px';b.style.top=y+'px';b.style.zIndex=90;b.innerHTML='<span class="ring"></span><span class="ring r2"></span>';document.body.appendChild(b);setTimeout(()=>b.remove(),900);}
-function genCharModal(){const w=modal(`<div class="modal-head"><h2>Gerar personagem com IA</h2><span class="tag ai">${SPARK}IA</span><button class="iconbtn" data-close aria-label="Fechar">${X}</button></div>
+function genCharModal(){if(!storyId)return;const w=modal(`<div class="modal-head"><h2>Gerar personagem com IA</h2><span class="tag ai">${SPARK}IA</span><button class="iconbtn" data-close aria-label="Fechar">${X}</button></div>
   <div class="modal-body"><div class="row" style="align-items:flex-end"><label class="field" style="flex:1"><span class="lbl">nome</span><input class="inp" id="gcName" value="Marta"></label><div class="field"><span class="lbl">cor · opcional</span><span class="row" style="height:30px"><input type="checkbox" id="gcHas" checked aria-label="Usar cor"><input type="color" id="gcColor" value="#5eead4" aria-label="Cor" style="width:34px;height:24px;border:0;background:none;padding:0"></span></div></div>
   <label class="field"><span class="lbl">descrição física</span><textarea class="inp" id="gcDesc">Mulher de 30 anos, alta, pele morena, cabelo preto longo preso em trança, usa jaqueta de couro.</textarea></label>
   <div class="field"><span class="lbl">emoções desejadas · nome e descrição viram o sprite</span><div id="gcEmos" style="display:flex;flex-direction:column;gap:6px"></div><button class="addbtn" id="gcAdd" style="align-self:flex-start">+ emoção</button></div>
-  <div class="gen-strip" id="gcStrip" hidden></div></div>
-  <div class="modal-foot"><button class="btn" data-close>Cancelar</button><button class="btn violet solid" id="gcGo">${SPARK.replace('<svg','<svg style="width:13px;height:13px"')}Gerar todos os sprites</button></div>`,'ai-glow');
+  <div class="hint">Primeiro sai o charsheet (frente e perfil); depois cada pose, uma por vez. Dá para fechar esta janela e seguir editando: o andamento aparece no painel de personagens.</div></div>
+  <div class="modal-foot"><button class="btn" data-close>Cancelar</button><button class="btn violet solid" id="gcGo">${SPARK13()}Gerar personagem</button></div>`,'ai-glow');
   const row=([n,d],anim)=>{const r=document.createElement('div');r.className='emo-row'+(anim?' fresh':'');r.innerHTML=`<input class="inp" value="${esc(n)}" placeholder="Nome" aria-label="Nome da emoção"><input class="inp" value="${esc(d)}" placeholder="Descrição" aria-label="Descrição da emoção"><button class="iconbtn sm" aria-label="Remover emoção">${X}</button>`;r.querySelector('button').onclick=()=>r.remove();w.querySelector('#gcEmos').appendChild(r);};
   [['Neutro','expressão calma'],['Feliz','sorriso confiante'],['Brava','olhar duro, sobrancelhas franzidas'],['Surpresa','olhos arregalados']].forEach(x=>row(x));w.querySelector('#gcAdd').onclick=()=>row(['',''],true);
   w.querySelector('#gcHas').onchange=e=>w.querySelector('#gcColor').disabled=!e.target.checked;
   w.querySelector('#gcGo').onclick=e=>{const name=w.querySelector('#gcName').value.trim();const list=[...w.querySelectorAll('.emo-row')].map(r=>[r.children[0].value.trim(),r.children[1].value.trim()]).filter(x=>x[0]);if(!name||!list.length){toast('Informe o nome e ao menos uma emoção.','err');return;}
-    const btn=e.currentTarget,label=btn.innerHTML;btn.disabled=true;btn.innerHTML='<span class="spinner"></span>Gerando…';const strip=w.querySelector('#gcStrip');strip.hidden=false;strip.innerHTML=list.map(()=>'<span class="slotph"></span>').join('');
-    const desc=w.querySelector('#gcDesc').value,color=w.querySelector('#gcHas').checked?w.querySelector('#gcColor').value:'';
-    requestAi('character',{name,desc,color,emotions:list.map(([n,d])=>({name:n,desc:d}))}).then(waitJob).then(job=>{
-      if(job.status!=='done')throw new Error(job.error);
-      const c={id:uid('c'),name,desc,color,source:'ai',sprites:JSON.parse(job.result).sprites.map(s=>({id:uid('sp'),name:s.name,desc:s.description,img:imgUrl(s.image_key)}))};
-      const add=()=>{pushUndo();state.characters.push(c);openCards.add(c.id);freshCards.set(c.id,performance.now());railTab='chars';if(w.isConnected)closeModal();renderRail();refresh();toast(`${name} gerado com ${c.sprites.length} sprites`,'ai');};
-      if(!w.isConnected){add();return;}
-      c.sprites.forEach((s,i)=>setTimeout(()=>{const ph=strip.children[i];if(ph){const img=document.createElement('img');img.src=s.img;img.alt=s.name;img.title=s.name;ph.replaceWith(img);}},i*180));
-      setTimeout(add,c.sprites.length*180+500);
-    }).catch(err=>{toast('Não foi possível gerar o personagem: '+aiMessage(err),'err');if(w.isConnected){btn.disabled=false;btn.innerHTML=label;strip.hidden=true;}});};}
-function genBgModal(){const w=modal(`<div class="modal-head"><h2>Gerar background com IA</h2><span class="tag ai">${SPARK}IA</span><button class="iconbtn" data-close aria-label="Fechar">${X}</button></div>
-  <div class="modal-body"><label class="field"><span class="lbl">nome</span><input class="inp" id="gbName" value="Floresta do manguezal"></label><label class="field"><span class="lbl">descrição</span><textarea class="inp" id="gbDesc">Mata fechada perto do mangue, fim de tarde, raízes aparentes e luz filtrada entre as árvores.</textarea></label><div class="stage-mini" id="gbPrev" hidden></div></div>
-  <div class="modal-foot"><button class="btn" data-close>Cancelar</button><button class="btn violet solid" id="gbGo">${SPARK.replace('<svg','<svg style="width:13px;height:13px"')}Gerar background</button></div>`,'narrow ai-glow');
-  w.querySelector('#gbGo').onclick=e=>{const n=w.querySelector('#gbName').value.trim();if(!n){toast('Dê um nome ao background.','err');return;}const btn=e.currentTarget,label=btn.innerHTML;btn.disabled=true;btn.innerHTML='<span class="spinner"></span>Gerando…';const pv=w.querySelector('#gbPrev');pv.hidden=false;pv.classList.remove('reveal');pv.innerHTML='<div class="gen-veil"><span class="skel" style="width:70%"></span><span class="skel" style="width:52%"></span><span class="skel" style="width:61%"></span></div>';
-    const desc=w.querySelector('#gbDesc').value;
-    requestAi('background',{name:n,desc}).then(waitJob).then(job=>{
-      if(job.status!=='done')throw new Error(job.error);
-      const b={id:uid('b'),name:n,desc,source:'ai',img:imgUrl(JSON.parse(job.result).image_key)};
-      const add=()=>{pushUndo();state.backgrounds.push(b);openCards.add(b.id);freshCards.set(b.id,performance.now());railTab='bgs';if(w.isConnected)closeModal();renderRail();refresh();toast(`Background “${n}” gerado`,'ai');};
-      if(!w.isConnected){add();return;}
-      pv.classList.add('reveal');pv.innerHTML=`<img class="bgimg" src="${b.img}" alt="">`;setTimeout(add,1000);
-    }).catch(err=>{toast('Não foi possível gerar o background: '+aiMessage(err),'err');if(w.isConnected){btn.disabled=false;btn.innerHTML=label;pv.hidden=true;}});};}
+    if(list.length>12){toast('No máximo 12 emoções por vez; as outras dá para pedir depois.','err');return;}
+    const btn=e.currentTarget;btn.disabled=true;
+    const desc=w.querySelector('#gcDesc').value,color=w.querySelector('#gcHas').checked?w.querySelector('#gcColor').value:'';const characterId=uid('c');
+    conn.reducers.generateCharacter({storyId,characterId,jobId:uid('j'),name,desc,color,poses:JSON.stringify(list.map(([n,d])=>({id:uid('sp'),name:n,desc:d})))}).then(()=>{
+      if(w.isConnected)closeModal();railTab='chars';openCards.add(characterId);freshCards.set(characterId,performance.now());renderRail();
+      toast(`Gerando ${name}: o charsheet primeiro, depois ${list.length} pose${list.length>1?'s':''}`,'ai');},
+      err=>{btn.disabled=false;castFailed('gerar o personagem')(err);});};}
+function genBgModal(){if(!storyId)return;const w=modal(`<div class="modal-head"><h2>Gerar background com IA</h2><span class="tag ai">${SPARK}IA</span><button class="iconbtn" data-close aria-label="Fechar">${X}</button></div>
+  <div class="modal-body"><label class="field"><span class="lbl">nome</span><input class="inp" id="gbName" value="Floresta do manguezal"></label><label class="field"><span class="lbl">descrição</span><textarea class="inp" id="gbDesc">Mata fechada perto do mangue, fim de tarde, raízes aparentes e luz filtrada entre as árvores.</textarea></label><div class="hint">O background aparece no painel e fica pronto em seguida; dá para seguir editando.</div></div>
+  <div class="modal-foot"><button class="btn" data-close>Cancelar</button><button class="btn violet solid" id="gbGo">${SPARK13()}Gerar background</button></div>`,'narrow ai-glow');
+  w.querySelector('#gbGo').onclick=e=>{const n=w.querySelector('#gbName').value.trim();if(!n){toast('Dê um nome ao background.','err');return;}const btn=e.currentTarget;btn.disabled=true;
+    const desc=w.querySelector('#gbDesc').value;const backgroundId=uid('b');
+    conn.reducers.generateBackground({storyId,backgroundId,jobId:uid('j'),name:n,desc}).then(()=>{
+      if(w.isConnected)closeModal();railTab='bgs';freshCards.set(backgroundId,performance.now());renderRail();toast(`Gerando o background “${n}”`,'ai');},
+      err=>{btn.disabled=false;castFailed('gerar o background')(err);});};}
 function completeText(s){if(gens.has(s.id))return;const prev=snapStr();const old=s.text;let result=null,iv=0,req=0;
   const w=modal(`<div class="modal-head"><h2>Completar texto</h2><span class="tag ai">${SPARK}IA</span><button class="iconbtn" data-close aria-label="Fechar">${X}</button></div><div class="modal-body"><label class="field"><span class="lbl">instrução opcional</span><span class="row"><input class="inp" id="ctInstr" placeholder="ex.: deixar mais tenso" style="flex:1"><button class="btn sm" id="ctAgain">Gerar de novo</button></span></label><div class="field"><span class="lbl">sugestão</span><div class="suggest" id="ctSug"></div></div><div class="hint">O texto só é substituído se você aceitar.</div></div><div class="modal-foot"><button class="btn" data-close>Recusar</button><button class="btn violet solid" id="ctOk" disabled>Aceitar</button></div>`,'narrow ai-glow');
   const sug=w.querySelector('#ctSug'),ok=w.querySelector('#ctOk'),again=w.querySelector('#ctAgain');
@@ -882,15 +853,25 @@ const errMsg=err=>String(err&&err.message||err).slice(0,160);
 // As views ainda mostram esta história (outra aba da mesma conta pode ter aberto outra).
 const viewsMine=()=>!!(conn&&storyId&&conn.db.curStory.id.find(storyId));
 
-const emptyFlat=()=>({title:'',start:'',scenes:new Map,choices:new Map});
-const cloneFlat=f=>({title:f.title,start:f.start,scenes:new Map([...f.scenes].map(([k,v])=>[k,{...v}])),choices:new Map([...f.choices].map(([k,v])=>[k,{...v}]))});
+// Elenco: chars (character), sprites e bgs (background). Só os campos que o autor edita; status,
+// error e sheetId vêm direto das linhas do servidor em writeFlat.
+const emptyFlat=()=>({title:'',start:'',scenes:new Map,choices:new Map,chars:new Map,sprites:new Map,bgs:new Map});
+const cloneMap=m=>new Map([...m].map(([k,v])=>[k,{...v}]));
+const cloneFlat=f=>({title:f.title,start:f.start,scenes:cloneMap(f.scenes),choices:cloneMap(f.choices),chars:cloneMap(f.chars),sprites:cloneMap(f.sprites),bgs:cloneMap(f.bgs)});
 function flatOf(st){const f=emptyFlat();f.title=st.title;f.start=st.start||'';
   for(const s of st.scenes){f.scenes.set(s.id,{title:s.title,x:Math.round(s.x),y:Math.round(s.y),bg:s.bg||'',chars:JSON.stringify(s.chars.map(x=>({c:x.c,s:x.s}))),kind:s.kind,speaker:s.speaker||'',text:s.text,next:s.next||'',ai:gens.has(s.id)?'generating':(s.aiStatus==='failed'&&s.text?'':(s.aiStatus||''))});
     s.choices.forEach((c,i)=>f.choices.set(c.id,{sceneId:s.id,label:c.label,target:c.target||'',position:i}));}
+  for(const c of st.characters||[]){f.chars.set(c.id,{name:c.name,desc:c.desc||'',color:c.color||'',source:c.source||'upload'});
+    c.sprites.forEach((p,i)=>f.sprites.set(p.id,{characterId:c.id,name:p.name,desc:p.desc||'',imageKey:p.imageKey||'',position:i}));}
+  for(const b of st.backgrounds||[])f.bgs.set(b.id,{name:b.name,desc:b.desc||'',imageKey:b.imageKey||'',source:b.source||'upload'});
   return f;}
 function flatServer(){const f=emptyFlat();const st=conn.db.curStory.id.find(storyId);if(st){f.title=st.title;f.start=st.startScene;}
   for(const r of conn.db.curScene.iter())f.scenes.set(r.id,{title:r.title,x:r.x,y:r.y,bg:r.bg,chars:r.chars,kind:r.kind,speaker:r.speaker,text:r.text,next:r.next,ai:r.ai});
   for(const r of conn.db.curChoice.iter())f.choices.set(r.id,{sceneId:r.sceneId,label:r.label,target:r.target,position:r.position});
+  const byTime=(a,b)=>Number(a.createdAt.microsSinceUnixEpoch-b.createdAt.microsSinceUnixEpoch)||(a.id<b.id?-1:1);
+  for(const r of[...conn.db.curCharacter.iter()].sort(byTime))f.chars.set(r.id,{name:r.name,desc:r.desc,color:r.color,source:r.source});
+  for(const r of[...conn.db.curSprite.iter()].sort((a,b)=>a.position-b.position||(a.id<b.id?-1:1)))f.sprites.set(r.id,{characterId:r.characterId,name:r.name,desc:r.desc,imageKey:r.imageKey,position:r.position});
+  for(const r of[...conn.db.curBackground.iter()].sort(byTime))f.bgs.set(r.id,{name:r.name,desc:r.desc,imageKey:r.imageKey,source:r.source});
   return f;}
 // Mesma semântica do reducer: valores finais, campos parciais, seguro de repetir.
 function applyOps(f,ops){for(const o of ops){
@@ -901,7 +882,13 @@ function applyOps(f,ops){for(const o of ops){
   else if(o.op==='upsert_choice'){const{id,...rest}=o.choice;f.choices.set(id,{...(f.choices.get(id)||{sceneId:'',label:'',target:'',position:0}),...rest});}
   else if(o.op==='delete_choice')f.choices.delete(o.id);
   else if(o.op==='set_start')f.start=o.id;
-  else if(o.op==='set_title')f.title=o.title;}
+  else if(o.op==='set_title')f.title=o.title;
+  else if(o.op==='upsert_character'){const{id,...rest}=o.character;f.chars.set(id,{...(f.chars.get(id)||{name:'Novo personagem',desc:'',color:'',source:'upload'}),...rest});}
+  else if(o.op==='delete_character'){f.chars.delete(o.id);for(const[k,p]of f.sprites)if(p.characterId===o.id)f.sprites.delete(k);}
+  else if(o.op==='upsert_sprite'){const{id,...rest}=o.sprite;f.sprites.set(id,{...(f.sprites.get(id)||{characterId:'',name:'Nova emoção',desc:'',imageKey:'',position:0}),...rest});}
+  else if(o.op==='delete_sprite')f.sprites.delete(o.id);
+  else if(o.op==='upsert_background'){const{id,...rest}=o.background;f.bgs.set(id,{...(f.bgs.get(id)||{name:'Background',desc:'',imageKey:'',source:'upload'}),...rest});}
+  else if(o.op==='delete_background')f.bgs.delete(o.id);}
   return f;}
 function diffFlat(a,b,skipPos){const ups=[],cups=[],cdel=[],sdel=[],meta=[];
   for(const[id,s]of b.scenes){const o=a.scenes.get(id);if(!o){ups.push({op:'upsert_scene',scene:{id,...s}});continue;}
@@ -913,8 +900,19 @@ function diffFlat(a,b,skipPos){const ups=[],cups=[],cdel=[],sdel=[],meta=[];
   for(const id of a.scenes.keys())if(!b.scenes.has(id))sdel.push({op:'delete_scene',id});
   if(b.start&&a.start!==b.start)meta.push({op:'set_start',id:b.start});
   if(a.title!==b.title)meta.push({op:'set_title',title:b.title});
-  return[...ups,...cups,...cdel,...meta,...sdel];}
-function touchKeys(o,f){if(o.op==='upsert_scene')return['s:'+o.scene.id];if(o.op==='upsert_choice')return['c:'+o.choice.id];if(o.op==='delete_choice')return['c:'+o.id];
+  // Elenco antes das cenas (uma cena nova usa um personagem novo) e as exclusões dele no fim
+  // (o servidor recusa apagar o que uma cena ainda usa).
+  const kups=[],kdel=[];
+  const upsMap=(am,bm,op,key)=>{for(const[id,v]of bm){const o=am.get(id);if(!o){kups.push({op,[key]:{id,...v}});continue;}const ch={};for(const k in v)if(v[k]!==o[k])ch[k]=v[k];if(Object.keys(ch).length)kups.push({op,[key]:{id,...ch}});}};
+  upsMap(a.chars,b.chars,'upsert_character','character');upsMap(a.sprites,b.sprites,'upsert_sprite','sprite');upsMap(a.bgs,b.bgs,'upsert_background','background');
+  for(const[id,p]of a.sprites)if(!b.sprites.has(id)&&b.chars.has(p.characterId))kdel.push({op:'delete_sprite',id});
+  for(const id of a.chars.keys())if(!b.chars.has(id))kdel.push({op:'delete_character',id});
+  for(const id of a.bgs.keys())if(!b.bgs.has(id))kdel.push({op:'delete_background',id});
+  return[...kups,...ups,...cups,...cdel,...meta,...sdel,...kdel];}
+function touchKeys(o,f){if(o.op==='upsert_scene')return['s:'+o.scene.id];
+  if(o.op==='upsert_character')return['k:'+o.character.id];if(o.op==='upsert_sprite')return['p:'+o.sprite.id];if(o.op==='upsert_background')return['g:'+o.background.id];
+  if(o.op==='delete_character')return['k:'+o.id,...[...f.sprites].filter(([,p])=>p.characterId===o.id).map(([k])=>'p:'+k)];
+  if(o.op==='delete_sprite')return['p:'+o.id];if(o.op==='delete_background')return['g:'+o.id];if(o.op==='upsert_choice')return['c:'+o.choice.id];if(o.op==='delete_choice')return['c:'+o.id];
   if(o.op==='delete_scene')return['s:'+o.id,...[...f.choices].filter(([,c])=>c.sceneId===o.id).map(([k])=>'c:'+k)];return[o.op==='set_title'?'title':'start'];}
 // Escreve um grafo no estado do demo sem trocar os objetos (arrasto, IA e menus guardam referências).
 function writeFlat(f){state.title=f.title;state.start=f.start;
@@ -927,7 +925,20 @@ function writeFlat(f){state.title=f.title;state.start=f.start;
     if(!gens.has(id))s.aiStatus=v.ai;
     const old=new Map(s.choices.map(c=>[c.id,c]));
     s.choices=(per.get(id)||[]).sort((a,b)=>a[1].position-b[1].position).map(([cid,c])=>{const o=old.get(cid)||{id:cid};if(!o.gen)o.label=c.label;o.target=c.target||null;return o;});
-    return s;});}
+    return s;});
+  writeCast(f);}
+// Elenco a partir do grafo plano, mantendo os objetos (cartões abertos e campos em edição apontam para eles).
+// Estado da geração (status, error, sheetId, meta) vem das linhas do servidor.
+function writeCast(f){const row=(t,id)=>conn?conn.db[t].id.find(id):null;
+  const oldC=new Map(state.characters.map(c=>[c.id,c])),oldS=new Map(state.characters.flatMap(c=>c.sprites).map(p=>[p.id,p])),oldB=new Map(state.backgrounds.map(b=>[b.id,b]));
+  const per=new Map;for(const[id,p]of f.sprites){if(!per.has(p.characterId))per.set(p.characterId,[]);per.get(p.characterId).push([id,p]);}
+  state.characters=[...f.chars].map(([id,v])=>{const c=oldC.get(id)||{id,sprites:[]};const r=row('curCharacter',id);
+    Object.assign(c,v,{status:r?.status||'',error:r?.error||'',sheetId:r?.sheetId||''});
+    c.sprites=(per.get(id)||[]).sort((a,b)=>a[1].position-b[1].position).map(([sid,pv])=>{const p=oldS.get(sid)||{id:sid};const pr=row('curSprite',sid);
+      Object.assign(p,{name:pv.name,desc:pv.desc,imageKey:pv.imageKey,img:imgUrl(pv.imageKey),status:pr?.status||'',error:pr?.error||''});return p;});
+    return c;});
+  state.backgrounds=[...f.bgs].map(([id,v])=>{const b=oldB.get(id)||{id};const r=row('curBackground',id);
+    Object.assign(b,v,{img:imgUrl(v.imageKey),status:r?.status||'',error:r?.error||''});return b;});}
 
 /* envio */
 let syncQueued=false,syncTimer=0,roAt=0;
@@ -941,8 +952,8 @@ function syncNow(){if(!base||!connected||resetting||!viewsMine())return;const sk
   applyOps(base,ops);const b={ops,t0:performance.now()};inflight.push(b);renderNet();
   conn.reducers.applyOperations({storyId,ops:JSON.stringify(ops)}).then(()=>{rtt.add('op',performance.now()-b.t0);settle(b);},err=>{settle(b);rejected(err,ops);});}
 function settle(b){const i=inflight.indexOf(b);if(i>=0)inflight.splice(i,1);renderNet();scheduleRebuild();}
-const ERRS={CYCLE:'Essa ligação fecharia um ciclo. Alguém pode ter criado o outro fio agora há pouco.',LOCKED:'Outra pessoa está escrevendo nesse campo.',START:'A cena inicial não pode ser excluída.',NO_START:'A história ficaria sem cena inicial.',BOTH:'Uma cena não pode ter ações e saída única ao mesmo tempo.',NOT_FOUND:'Essa cena foi apagada por outra pessoa.',TOO_MANY:'Uma cena tem no máximo 6 personagens.',DUP_CHAR:'Esse personagem já está na cena.',SPEAKER:'Quem fala precisa estar na cena.',INVALID:'Alteração inválida.',FORBIDDEN:'Você não tem permissão para essa alteração.'};
-function rejected(err,ops){const m=errMsg(err);const code=(m.match(/\b(CYCLE|LOCKED|START|NO_START|BOTH|NOT_FOUND|TOO_MANY|DUP_CHAR|SPEAKER|INVALID|FORBIDDEN)\b(?::\d+(?::([\w-]+))?)?/)||[]);
+const ERRS={CYCLE:'Essa ligação fecharia um ciclo. Alguém pode ter criado o outro fio agora há pouco.',LOCKED:'Outra pessoa está escrevendo nesse campo.',START:'A cena inicial não pode ser excluída.',NO_START:'A história ficaria sem cena inicial.',BOTH:'Uma cena não pode ter ações e saída única ao mesmo tempo.',NOT_FOUND:'Essa cena foi apagada por outra pessoa.',TOO_MANY:'Uma cena tem no máximo 6 personagens.',DUP_CHAR:'Esse personagem já está na cena.',SPEAKER:'Quem fala precisa estar na cena.',INVALID:'Alteração inválida.',FORBIDDEN:'Você não tem permissão para essa alteração.',USED:'Esse item do elenco ainda aparece em uma cena (talvez alguém acabou de usá-lo).'};
+function rejected(err,ops){const m=errMsg(err);const code=(m.match(/\b(CYCLE|LOCKED|START|NO_START|BOTH|NOT_FOUND|TOO_MANY|DUP_CHAR|SPEAKER|INVALID|FORBIDDEN|USED)\b(?::\d+(?::([\w-]+))?)?/)||[]);
   if(code[1]){toast('Recusado pelo servidor: '+ERRS[code[1]],'err');if(code[2]&&scene(code[2]))nodeShake(code[2]);else shake();return;}
   // Queda de conexão: o lote pode ou não ter sido aplicado; como é seguro repetir, reenviamos depois.
   retryOps.push(ops);toast('Sem conexão — a alteração será reenviada ao reconectar.','err');}
@@ -955,16 +966,36 @@ function rebuild(){if(!conn||!ready||!viewsMine())return;const srv=flatServer();
   const unsent=base&&!resetting?diffFlat(base,flatOf(state),null):[];
   for(const b of inflight)applyOps(srv,b.ops);
   const local=cloneFlat(srv);for(const ops of retryOps)applyOps(local,ops);applyOps(local,unsent);
-  const hadRetry=retryOps.length>0;retryOps=[];base=srv;writeFlat(local);renderNodes();
+  const hadRetry=retryOps.length>0;retryOps=[];base=srv;writeFlat(local);renderNodes();renderRailSoon();migrateLegacyCast();
   if(document.activeElement!==$('#storyTitle'))$('#storyTitle').value=state.title;
   if(hadRetry&&connected)scheduleSync();}
 
 // O exemplo vira operações com ids novos: ids de cena e ação são globais no banco.
+// O elenco também: ids de personagem, sprite e background são globais.
 function exampleGraph(){const ops=diffFlat(emptyFlat(),flatOf(SEED),null).filter(o=>o.op!=='set_title'&&o.op!=='set_start');
   const ids=new Map;const re=(id,p)=>{if(!id)return id;if(!ids.has(id))ids.set(id,uid(p));return ids.get(id);};
-  for(const o of ops){if(o.op==='upsert_scene'){o.scene.id=re(o.scene.id,'s');o.scene.next=re(o.scene.next,'s');}
-    else if(o.op==='upsert_choice'){o.choice.id=re(o.choice.id,'c');o.choice.sceneId=re(o.choice.sceneId,'s');o.choice.target=re(o.choice.target,'s');}}
+  for(const o of ops){if(o.op==='upsert_scene'){o.scene.id=re(o.scene.id,'s');o.scene.next=re(o.scene.next,'s');o.scene.bg=re(o.scene.bg,'b');o.scene.speaker=re(o.scene.speaker,'c');o.scene.chars=JSON.stringify(JSON.parse(o.scene.chars).map(x=>({c:re(x.c,'c'),s:re(x.s,'sp')})));}
+    else if(o.op==='upsert_choice'){o.choice.id=re(o.choice.id,'c');o.choice.sceneId=re(o.choice.sceneId,'s');o.choice.target=re(o.choice.target,'s');}
+    else if(o.op==='upsert_character')o.character.id=re(o.character.id,'c');
+    else if(o.op==='upsert_sprite'){o.sprite.id=re(o.sprite.id,'sp');o.sprite.characterId=re(o.sprite.characterId,'c');}
+    else if(o.op==='upsert_background')o.background.id=re(o.background.id,'b');}
   return{ops,start:re(SEED.start,'s')};}
+// Histórias de antes do elenco em tabelas apontam para os ids fixos do elenco de exemplo (c1, sp2…),
+// que ficava só no navegador. Ao abrir uma delas sem elenco no banco, quem edita grava o elenco de
+// exemplo com ids próprios da história (iguais em todos os navegadores: duas abas não duplicam) e
+// as cenas passam a apontar para eles.
+const migrated=new Set;
+function migrateLegacyCast(){if(!connected||!storyId||migrated.has(storyId)||myRole==='viewer'||!myRole)return;
+  if(conn.db.curCharacter.count()>0||conn.db.curBackground.count()>0)return;
+  const seedIds=new Set([...SEED.characters.flatMap(c=>[c.id,...c.sprites.map(p=>p.id)]),...SEED.backgrounds.map(b=>b.id)]);
+  const rows=[...conn.db.curScene.iter()];const uses=s=>seedIds.has(s.bg)||seedIds.has(s.speaker)||castOf(s).some(x=>seedIds.has(x.c)||seedIds.has(x.s));
+  if(!rows.some(uses))return;migrated.add(storyId);
+  const re=id=>seedIds.has(id)?`${id}-${storyId}`.slice(0,64):id;
+  const cast=diffFlat(emptyFlat(),flatOf({title:'',start:'',scenes:[],characters:SEED.characters,backgrounds:SEED.backgrounds}),null);
+  for(const o of cast){if(o.character)o.character.id=re(o.character.id);if(o.sprite){o.sprite.id=re(o.sprite.id);o.sprite.characterId=re(o.sprite.characterId);}if(o.background)o.background.id=re(o.background.id);}
+  const scenes=rows.filter(uses).map(s=>({op:'upsert_scene',scene:{id:s.id,bg:re(s.bg),speaker:re(s.speaker),chars:JSON.stringify(castOf(s).map(x=>({c:re(x.c),s:re(x.s)})))}}));
+  conn.reducers.applyOperations({storyId,ops:JSON.stringify([...cast,...scenes])}).then(()=>toast('O elenco desta história agora fica salvo no servidor.'),err=>{migrated.delete(storyId);console.warn('migração do elenco',errMsg(err));});}
+const castOf=s=>{try{const a=JSON.parse(s.chars);return Array.isArray(a)?a:[];}catch(_){return[];}};
 function resetExample(){if(!conn||!connected||!storyId)return;resetting=true;undoS.length=0;redoS.length=0;syncUndo();gens.clear();lit.clear();
   const{ops,start}=exampleGraph();const t0=performance.now();
   conn.reducers.resetStory({storyId,title:SEED.title,startScene:start,ops:JSON.stringify(ops)}).then(()=>{rtt.add('op',performance.now()-t0);resetting=false;base=null;state.scenes=[];rebuild();requestAnimationFrame(fitView);toast('História de exemplo restaurada');},err=>{resetting=false;toast('Falha ao reiniciar: '+errMsg(err),'err');});}
@@ -1043,7 +1074,7 @@ document.addEventListener('pointerdown',e=>{if(!e.target.closest('#hudPop,[data-
 document.addEventListener('keydown',e=>{if(e.key==='Escape')closeHudPop();});
 // ⋯: ações raras e destrutivas, fora da barra (só o dono vê o botão).
 $('#btnMore').onclick=e=>{const h=toggleHudPop(e.currentTarget,'<div class="menu" role="menu"><button data-m="reset" class="danger" role="menuitem">Recriar o exemplo…</button></div>');if(!h)return;
-  h.querySelector('[data-m="reset"]').onclick=()=>{closeHudPop();askConfirm({title:'Recriar o exemplo',ok:'Apagar e recriar',danger:true,text:'Todas as cenas desta história são apagadas e trocadas pelo exemplo, para todas as pessoas que estão nela.'}).then(yes=>{if(yes)resetExample();});};};
+  h.querySelector('[data-m="reset"]').onclick=()=>{closeHudPop();askConfirm({title:'Recriar o exemplo',ok:'Apagar e recriar',danger:true,text:'Todas as cenas e o elenco desta história são apagados e trocados pelo exemplo, para todas as pessoas que estão nela.'}).then(yes=>{if(yes)resetExample();});};};
 const SHORTCUTS=[['Clique ou arraste uma saída','cria uma cena ligada a ela'],['<span class="kbd">Shift</span> + clicar ou arrastar','a IA monta a cena'],['<span class="kbd">Shift</span> em “+ ação”','a IA sugere a ação'],
   ['<span class="kbd">Alt</span> + arrastar','corta fios'],['<span class="kbd">Ctrl</span> <span class="kbd">Z</span>','desfaz'],['<span class="kbd">Ctrl</span> <span class="kbd">Shift</span> <span class="kbd">Z</span>','refaz']];
 $('#btnHelp').onclick=e=>toggleHudPop(e.currentTarget,`<div class="helppop" role="dialog" aria-label="Atalhos"><h3>Atalhos</h3><dl>${SHORTCUTS.map(([k,v])=>`<dt>${k}</dt><dd>${v}</dd>`).join('')}</dl></div>`);
@@ -1098,7 +1129,7 @@ function leaveStory(close=true){if(!storyId)return;releaseLock();
   if(dragSub){try{dragSub.unsubscribe();}catch(_){}dragSub=null;}
   storyId='';myRole='';ready=false;base=null;inflight.length=0;retryOps=[];expanded=null;
   undoS.length=0;redoS.length=0;gens.clear();lit.clear();remoteDrag.clear();for(const c of cursors.values())c.el.remove();cursors.clear();
-  chatLive=false;state.scenes=[];state.title='';state.start='';closeModal();closeHudPop();resetChat();renderAll();}
+  chatLive=false;state.scenes=[];state.title='';state.start='';state.characters=[];state.backgrounds=[];openCards.clear();closeModal();closeHudPop();resetChat();renderAll();}
 function showHome(){leaveStory();$('#gate').hidden=true;$('#home').hidden=false;document.title='Roteiro VN';renderHome();}
 async function enterStory(id){$('#gate').hidden=true;$('#home').hidden=true;if(storyId===id)return;leaveStory(false);storyId=id;
   try{await conn.reducers.openStory({storyId:id});await until(()=>storyId!==id||viewsMine());}
@@ -1216,7 +1247,15 @@ function connect(){
   if(DEV_ANON)b.withToken(sessionStorage.getItem(TOKEN_KEY)||undefined);else b.withToken(idToken).withTokenProvider(freshToken);
   conn=b.onConnect((c,identity,token)=>{if(DEV_ANON)sessionStorage.setItem(TOKEN_KEY,token);myId=identity;myConn=c.connectionId;connected=true;netState='on';renderNet();
       const re=()=>scheduleRebuild();
-      for(const t of[c.db.curStory,c.db.curScene,c.db.curChoice]){t.onInsert(re);t.onUpdate(re);t.onDelete(re);}
+      for(const t of[c.db.curStory,c.db.curScene,c.db.curChoice,c.db.curCharacter,c.db.curSprite,c.db.curBackground]){t.onInsert(re);t.onUpdate(re);t.onDelete(re);}
+      // Geração do elenco terminou (ou falhou) enquanto a pessoa fazia outra coisa.
+      c.db.curSprite.onUpdate((_c,o,r)=>{if(!viewsMine())return;const ch=c.db.curCharacter.id.find(r.characterId);
+        if(o.status==='generating'&&r.status==='failed')toast(`A pose “${r.name}” de ${ch?.name||'personagem'} falhou: ${aiMessage(r.error)}`,'err');
+        else if(o.status==='generating'&&!r.status&&r.imageKey)freshSprites.set(r.id,performance.now());});
+      c.db.curCharacter.onUpdate((_c,o,r)=>{if(!viewsMine())return;if(o.status==='generating'&&r.status==='failed')toast(`Não foi possível gerar o charsheet de ${r.name}: ${aiMessage(r.error)}`,'err');
+        else if(o.status==='generating'&&!r.status)toast(`Charsheet de ${r.name} pronto; gerando as poses`,'ai');});
+      c.db.curBackground.onUpdate((_c,o,r)=>{if(!viewsMine())return;if(o.status==='generating'&&r.status==='failed')toast(`Não foi possível gerar o background “${r.name}”: ${aiMessage(r.error)}`,'err');
+        else if(o.status==='generating'&&!r.status)toast(`Background “${r.name}” pronto`,'ai');});
       c.db.curStory.onUpdate((_ctx,_old,row)=>{if(row.id===storyId)document.title=(row.title||'História')+' · Roteiro VN';});
       c.db.curScene.onDelete((ctx,row)=>{const s=scene(row.id);if(viewsMine()&&s&&(expanded===row.id||nodeEl(row.id)?.contains(document.activeElement))&&!inflight.some(b=>b.ops.some(o=>o.op==='delete_scene'&&o.id===row.id)))toast(`A cena “${row.title}” foi apagada por outra pessoa.${s.text?' Seu texto: “'+s.text.slice(0,120)+'”':''}`,'err');});
       const rl=()=>renderNodes();c.db.curLocks.onInsert(rl);c.db.curLocks.onUpdate(rl);c.db.curLocks.onDelete(rl);
@@ -1234,6 +1273,7 @@ function connect(){
       c.subscriptionBuilder().onApplied(()=>{subsReady=true;route();}).onError((_ctx,err)=>toast('Erro na assinatura: '+errMsg(err),'err')).subscribe([
         'SELECT * FROM my_account','SELECT * FROM my_stories','SELECT * FROM my_memberships',
         'SELECT * FROM cur_story','SELECT * FROM cur_scene','SELECT * FROM cur_choice','SELECT * FROM cur_presence','SELECT * FROM cur_locks',
+        'SELECT * FROM cur_character','SELECT * FROM cur_sprite','SELECT * FROM cur_background',
         'SELECT * FROM cur_member','SELECT * FROM cur_account','SELECT * FROM cur_profile','SELECT * FROM cur_invite','SELECT * FROM cur_link',
         'SELECT * FROM my_ai_job','SELECT * FROM my_chat_message','SELECT * FROM chat_chunk WHERE requester = :sender']);})
     // A presença nova volta para a história aberta (on_connect lê active_story); a assinatura é refeita pelo SDK.

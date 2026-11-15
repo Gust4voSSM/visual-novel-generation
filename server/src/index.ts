@@ -1,8 +1,8 @@
 // Roteiro VN — spike do módulo SpacetimeDB.
 // Cobre: grafo de cenas com validação no servidor (ciclo, 6 personagens, falante,
 // ações x saída única, cena inicial), presença com cursores, arrasto ao vivo por
-// tabela de eventos e trava suave de campos de texto. Personagens e backgrounds
-// ficam no cliente neste spike (ids fixos), então não são validados aqui.
+// tabela de eventos e trava suave de campos de texto. Elenco (personagens, sprites,
+// backgrounds e charsheets) em tabelas por história, com as imagens só como links.
 // IA (seção 2.6): procedures suggest_scene/complete_text e fila ai_job para o worker.
 // Com AI_PROVIDER=mock tudo responde com conteúdo simulado; sem AI_PROVIDER, AI_DISABLED.
 // Contas: login Google (o ID token é o token da conexão; o módulo confere iss e aud).
@@ -237,10 +237,80 @@ const config = table(
   }
 );
 
+// ---------- elenco ----------
+// Personagens, sprites e backgrounds de cada história. As imagens são só links (image_key: caminho
+// relativo à base pública de imagens, ex. img/<hex>.png no KV das Pages Functions), nunca bytes.
+// O autor edita os campos de texto e envia imagens por apply_operations; status, error e sheetId
+// só mudam pelos reducers de geração e pelo worker (complete_job/fail_job).
+const character = table(
+  {},
+  {
+    id: t.string().primaryKey(),
+    storyId: t.string().index('btree'),
+    name: t.string(),
+    desc: t.string(),
+    color: t.string(),
+    source: t.string(), // 'upload' | 'ai' | 'marketplace' | 'example'
+    sheetId: t.string(), // charsheet gerado (front + side); '' = sem charsheet
+    status: t.string(), // '' | 'generating' | 'failed'
+    error: t.string(),
+    createdAt: t.timestamp(),
+  }
+);
+
+const sprite = table(
+  {},
+  {
+    id: t.string().primaryKey(),
+    storyId: t.string().index('btree'),
+    characterId: t.string().index('btree'),
+    name: t.string(),
+    desc: t.string(),
+    imageKey: t.string(), // '' enquanto a pose não fica pronta
+    position: t.u32(),
+    status: t.string(), // '' | 'pending' (espera o charsheet) | 'generating' | 'failed'
+    error: t.string(),
+    meta: t.string(), // JSON do worker: caminho (keyed/native) e se passou nas verificações
+  }
+);
+
+const background = table(
+  {},
+  {
+    id: t.string().primaryKey(),
+    storyId: t.string().index('btree'),
+    name: t.string(),
+    desc: t.string(),
+    imageKey: t.string(),
+    baseKey: t.string(), // base 1536×1024 gerada, para variantes
+    source: t.string(),
+    status: t.string(), // '' | 'generating' | 'failed'
+    error: t.string(),
+    createdAt: t.timestamp(),
+  }
+);
+
+// Referências de um personagem gerado (PLANO-SPRITES-BACKGROUNDS.md, seção 2). Só o worker grava.
+const charsheet = table(
+  {},
+  {
+    id: t.string().primaryKey(),
+    storyId: t.string().index('btree'),
+    characterId: t.string().index('btree'),
+    design: t.string(),
+    front: t.string(),
+    side: t.string(),
+    keyColor: t.string(), // '' = só o caminho nativo
+    keyScores: t.string(), // JSON
+    unit: t.string(), // JSON: altura e linha dos pés do front
+    createdAt: t.timestamp(),
+  }
+);
+
 const spacetimedb = schema(
   {
     account, story, storyMember, storyInvite, storyLink, linkJoin, activeStory, scene, choice, profile, presence, drags, locks, sweep,
-    aiJob, chatMessage, chatChunk, aiRate, config,
+    aiJob, chatMessage, chatChunk, aiRate, config, character, sprite, background, charsheet,
   },
   {
     // Definidos na publicação (variáveis de ambiente do shell). Sem AI_PROVIDER, a IA fica desabilitada.
@@ -322,7 +392,23 @@ type Op =
   | { op: 'upsert_choice'; choice: Record<string, unknown> & { id: string } }
   | { op: 'delete_choice'; id: string }
   | { op: 'set_start'; id: string }
-  | { op: 'set_title'; title: string };
+  | { op: 'set_title'; title: string }
+  | { op: 'upsert_character'; character: Record<string, unknown> & { id: string } }
+  | { op: 'delete_character'; id: string }
+  | { op: 'upsert_sprite'; sprite: Record<string, unknown> & { id: string } }
+  | { op: 'delete_sprite'; id: string }
+  | { op: 'upsert_background'; background: Record<string, unknown> & { id: string } }
+  | { op: 'delete_background'; id: string };
+
+// Só links para imagens servidas pelo próprio app: nada de data: nem URLs de outros sites.
+//   img/<hex>         KV das Pages Functions (uploads e imagens geradas)
+//   generated/<hex>   disco local do worker (experimentos antigos)
+//   placeholders/…    imagens do modo mock
+//   example/…         elenco da história de exemplo e do marketplace (client/public/example)
+const IMAGE_KEY_RE = /^(?:img\/[0-9a-f]{32}\.(?:png|jpg|webp)|generated\/[0-9a-f]{32}\.(?:png|jpg|webp)|placeholders\/[\w-]{1,40}\.svg|example\/[\w-]{1,60}\.svg)$/;
+const imageKeyOk = (k: unknown) => k === '' || (typeof k === 'string' && IMAGE_KEY_RE.test(k));
+const CAST_SOURCES = new Set(['upload', 'ai', 'marketplace', 'example']);
+const str = (v: unknown, max: number) => String(v ?? '').slice(0, max);
 
 const SCENE_FIELDS = ['title', 'x', 'y', 'bg', 'chars', 'kind', 'speaker', 'text', 'next', 'ai'] as const;
 const TEXT_FIELDS = new Set(['title', 'text']);
@@ -349,6 +435,24 @@ function ownChoice(ctx: Ctx, storyId: string, id: string, i: number) {
   const cur = ctx.db.choice.id.find(id);
   if (cur && cur.storyId !== storyId) fail('FORBIDDEN', i, id);
   return cur;
+}
+
+const validId = (id: unknown): id is string => typeof id === 'string' && !!id && id.length <= 64;
+
+function castOf(s: { chars: string }): { c: string; s: string }[] {
+  try { const a = JSON.parse(s.chars); return Array.isArray(a) ? a : []; } catch { return []; }
+}
+
+// Não se apaga do elenco o que uma cena da história usa (o cliente avisa antes).
+function sceneUsing(ctx: Ctx, storyId: string, uses: (s: { bg: string; chars: string }) => boolean) {
+  for (const s of ctx.db.scene.storyId.filter(storyId)) if (uses(s)) return true;
+  return false;
+}
+
+function deleteCharacter(ctx: Ctx, id: string) {
+  for (const sp of [...ctx.db.sprite.characterId.filter(id)]) ctx.db.sprite.id.delete(sp.id);
+  for (const cs of [...ctx.db.charsheet.characterId.filter(id)]) ctx.db.charsheet.id.delete(cs.id);
+  ctx.db.character.id.delete(id);
 }
 
 function applyOp(ctx: Ctx, storyId: string, o: Op, i: number) {
@@ -404,6 +508,87 @@ function applyOp(ctx: Ctx, storyId: string, o: Op, i: number) {
       if (lockedByOther(ctx, `story:${storyId}:title`)) fail('LOCKED', i, 'story');
       const st = ctx.db.story.id.find(storyId);
       if (st) ctx.db.story.id.update({ ...st, title: String(o.title ?? '').slice(0, 200) });
+      break;
+    }
+    case 'upsert_character': {
+      const v = o.character;
+      if (!validId(v?.id)) fail('INVALID', i);
+      const cur = ctx.db.character.id.find(v.id);
+      if (cur && cur.storyId !== storyId) fail('FORBIDDEN', i, v.id);
+      if ('source' in v && !CAST_SOURCES.has(String(v.source))) fail('INVALID', i, v.id);
+      const row = cur ? { ...cur } : {
+        id: v.id, storyId, name: 'Novo personagem', desc: '', color: '', source: 'upload', sheetId: '', status: '', error: '', createdAt: ctx.timestamp,
+      };
+      if ('name' in v) row.name = str(v.name, 80);
+      if ('desc' in v) row.desc = str(v.desc, 2000);
+      if ('color' in v) row.color = str(v.color, 20);
+      if ('source' in v) row.source = String(v.source);
+      if (cur) ctx.db.character.id.update(row);
+      else ctx.db.character.insert(row);
+      break;
+    }
+    case 'delete_character': {
+      const cur = ctx.db.character.id.find(o.id);
+      if (!cur) break;
+      if (cur.storyId !== storyId) fail('FORBIDDEN', i, o.id);
+      if (sceneUsing(ctx, storyId, s => castOf(s).some(x => x.c === o.id))) fail('USED', i, o.id);
+      deleteCharacter(ctx, o.id);
+      break;
+    }
+    case 'upsert_sprite': {
+      const v = o.sprite;
+      if (!validId(v?.id)) fail('INVALID', i);
+      const cur = ctx.db.sprite.id.find(v.id);
+      if (cur && cur.storyId !== storyId) fail('FORBIDDEN', i, v.id);
+      const characterId = 'characterId' in v ? String(v.characterId) : cur?.characterId ?? '';
+      const ch = ctx.db.character.id.find(characterId);
+      if (!ch || ch.storyId !== storyId) fail('NOT_FOUND', i, v.id);
+      if ('imageKey' in v && !imageKeyOk(v.imageKey)) fail('INVALID', i, v.id);
+      const row = cur ? { ...cur } : {
+        id: v.id, storyId, characterId, name: 'Nova emoção', desc: '', imageKey: '', position: 0, status: '', error: '', meta: '',
+      };
+      row.characterId = characterId;
+      if ('name' in v) row.name = str(v.name, 80);
+      if ('desc' in v) row.desc = str(v.desc, 1000);
+      if ('position' in v) row.position = Math.max(0, Math.min(10_000, Math.floor(Number(v.position) || 0)));
+      // Imagem enviada pelo autor: a pose fica pronta, mesmo que estivesse gerando ou falhada.
+      if ('imageKey' in v && v.imageKey !== row.imageKey) Object.assign(row, { imageKey: String(v.imageKey), status: '', error: '', meta: '' });
+      if (cur) ctx.db.sprite.id.update(row);
+      else ctx.db.sprite.insert(row);
+      break;
+    }
+    case 'delete_sprite': {
+      const cur = ctx.db.sprite.id.find(o.id);
+      if (!cur) break;
+      if (cur.storyId !== storyId) fail('FORBIDDEN', i, o.id);
+      if (sceneUsing(ctx, storyId, s => castOf(s).some(x => x.s === o.id))) fail('USED', i, o.id);
+      ctx.db.sprite.id.delete(o.id);
+      break;
+    }
+    case 'upsert_background': {
+      const v = o.background;
+      if (!validId(v?.id)) fail('INVALID', i);
+      const cur = ctx.db.background.id.find(v.id);
+      if (cur && cur.storyId !== storyId) fail('FORBIDDEN', i, v.id);
+      if ('imageKey' in v && !imageKeyOk(v.imageKey)) fail('INVALID', i, v.id);
+      if ('source' in v && !CAST_SOURCES.has(String(v.source))) fail('INVALID', i, v.id);
+      const row = cur ? { ...cur } : {
+        id: v.id, storyId, name: 'Background', desc: '', imageKey: '', baseKey: '', source: 'upload', status: '', error: '', createdAt: ctx.timestamp,
+      };
+      if ('name' in v) row.name = str(v.name, 80);
+      if ('desc' in v) row.desc = str(v.desc, 2000);
+      if ('source' in v) row.source = String(v.source);
+      if ('imageKey' in v && v.imageKey !== row.imageKey) Object.assign(row, { imageKey: String(v.imageKey), baseKey: '', status: '', error: '' });
+      if (cur) ctx.db.background.id.update(row);
+      else ctx.db.background.insert(row);
+      break;
+    }
+    case 'delete_background': {
+      const cur = ctx.db.background.id.find(o.id);
+      if (!cur) break;
+      if (cur.storyId !== storyId) fail('FORBIDDEN', i, o.id);
+      if (sceneUsing(ctx, storyId, s => s.bg === o.id)) fail('USED', i, o.id);
+      ctx.db.background.id.delete(o.id);
       break;
     }
     default:
@@ -482,6 +667,13 @@ function clearGraph(ctx: Ctx, storyId: string) {
   for (const l of [...ctx.db.locks.storyId.filter(storyId)]) ctx.db.locks.target.delete(l.target);
 }
 
+function clearCast(ctx: Ctx, storyId: string) {
+  for (const r of [...ctx.db.sprite.storyId.filter(storyId)]) ctx.db.sprite.id.delete(r.id);
+  for (const r of [...ctx.db.charsheet.storyId.filter(storyId)]) ctx.db.charsheet.id.delete(r.id);
+  for (const r of [...ctx.db.character.storyId.filter(storyId)]) ctx.db.character.id.delete(r.id);
+  for (const r of [...ctx.db.background.storyId.filter(storyId)]) ctx.db.background.id.delete(r.id);
+}
+
 // Cria a história com o grafo inicial (o cliente manda uma cena vazia ou o exemplo).
 export const create_story = spacetimedb.reducer(
   { id: t.string(), title: t.string(), startScene: t.string(), ops: t.string() },
@@ -515,6 +707,7 @@ export const reset_story = spacetimedb.reducer(
   (ctx, { storyId, title, startScene, ops }) => {
     const st = requireRole(ctx, storyId, 'owner');
     clearGraph(ctx, storyId);
+    clearCast(ctx, storyId); // o lote do exemplo traz o elenco dele
     ctx.db.story.id.update({ ...st, title: title.slice(0, 200), startScene, updatedAt: ctx.timestamp });
     parseOps(ops).forEach((o, i) => applyOp(ctx, storyId, o, i));
     validate(ctx, storyId);
@@ -533,6 +726,7 @@ export const delete_story = spacetimedb.reducer({ storyId: t.string() }, (ctx, {
   // Pedidos em andamento somem também: complete_job/fail_job do worker caem em NOT_FOUND.
   for (const j of [...ctx.db.aiJob.storyId.filter(storyId)]) ctx.db.aiJob.id.delete(j.id);
   for (const m of [...ctx.db.chatMessage.storyId.filter(storyId)]) ctx.db.chatMessage.id.delete(m.id);
+  clearCast(ctx, storyId);
   ctx.db.story.id.delete(storyId);
 });
 
@@ -725,6 +919,23 @@ export const cur_invite = spacetimedb.view({ public: true }, t.array(storyInvite
   return id && hasRole(ctx.db, id, ctx.sender, 'owner') ? [...ctx.db.storyInvite.storyId.filter(id)] : [];
 });
 
+export const cur_character = spacetimedb.view({ public: true }, t.array(character.rowType), ctx => {
+  const id = curStoryId(ctx);
+  return id ? [...ctx.db.character.storyId.filter(id)] : [];
+});
+export const cur_sprite = spacetimedb.view({ public: true }, t.array(sprite.rowType), ctx => {
+  const id = curStoryId(ctx);
+  return id ? [...ctx.db.sprite.storyId.filter(id)] : [];
+});
+export const cur_background = spacetimedb.view({ public: true }, t.array(background.rowType), ctx => {
+  const id = curStoryId(ctx);
+  return id ? [...ctx.db.background.storyId.filter(id)] : [];
+});
+export const cur_charsheet = spacetimedb.view({ public: true }, t.array(charsheet.rowType), ctx => {
+  const id = curStoryId(ctx);
+  return id ? [...ctx.db.charsheet.storyId.filter(id)] : [];
+});
+
 // Link da história aberta: só o dono vê o código (os outros membros já estão dentro).
 export const cur_link = spacetimedb.view({ public: true }, t.array(storyLink.rowType), ctx => {
   const id = curStoryId(ctx);
@@ -895,6 +1106,7 @@ export const complete_job = spacetimedb.reducer({ id: t.string(), result: t.stri
   const j = jobFor(ctx, id);
   if (j.status !== 'running') throw new SenderError('INVALID');
   ctx.db.aiJob.id.update({ ...j, status: 'done', result, updatedAt: ctx.timestamp });
+  onCastJob(ctx, j, result, '');
   // Conversa limpa enquanto a IA respondia: a resposta não volta para o chat.
   if (j.kind === 'chat' && ctx.db.chatMessage.id.find(id + ':u')) {
     let r: { content?: string; proposals?: unknown[] };
@@ -911,6 +1123,7 @@ export const fail_job = spacetimedb.reducer({ id: t.string(), error: t.string() 
   const j = jobFor(ctx, id);
   if (j.status === 'done' || j.status === 'failed') return;
   ctx.db.aiJob.id.update({ ...j, status: 'failed', error: error.slice(0, 200), updatedAt: ctx.timestamp });
+  onCastJob(ctx, j, null, error.slice(0, 200));
 });
 
 // Cada pessoa vê só os próprios pedidos e a conversa da história aberta; o worker vê a fila inteira.
@@ -934,6 +1147,217 @@ export const worker_scene = spacetimedb.view({ public: true }, t.array(scene.row
 export const worker_choice = spacetimedb.view({ public: true }, t.array(choice.rowType), ctx =>
   isWorker(ctx as any) ? [...ctx.db.choice.iter()] : []
 );
+// Elenco para o contexto da IA (nomes, descrições e ids; as imagens não vão para o modelo de texto).
+export const worker_character = spacetimedb.view({ public: true }, t.array(character.rowType), ctx =>
+  isWorker(ctx as any) ? [...ctx.db.character.iter()] : []
+);
+export const worker_sprite = spacetimedb.view({ public: true }, t.array(sprite.rowType), ctx =>
+  isWorker(ctx as any) ? [...ctx.db.sprite.iter()] : []
+);
+export const worker_background = spacetimedb.view({ public: true }, t.array(background.rowType), ctx =>
+  isWorker(ctx as any) ? [...ctx.db.background.iter()] : []
+);
+
+// ---------- IA: geração do elenco ----------
+// Cada pedido cria as linhas na hora (status generating/pending) e entra na fila; o resultado chega
+// pelo complete_job/fail_job do worker (onCastJob). Fecha a aba, recarrega: o estado fica na tabela.
+//   charsheet  front + side de um personagem; ao terminar, as poses pendentes viram pedidos 'pose'
+//   pose       uma pose (sprite) a partir do charsheet
+//   background um background (base 1536×1024 recortada para 16:9)
+const MAX_POSES = 12;
+
+function insertJob(ctx: Ctx, id: string, requester: Identity, storyId: string, kind: string, input: unknown) {
+  if (ctx.db.aiJob.id.find(id)) throw new SenderError('INVALID');
+  ctx.db.aiJob.insert({
+    id, requester, storyId, kind, input: JSON.stringify(input), status: 'pending', result: '', error: '',
+    createdAt: ctx.timestamp, updatedAt: ctx.timestamp,
+  });
+}
+
+const designOf = (c: { name: string; desc: string }) => (c.desc.trim() ? `${c.name}: ${c.desc.trim()}` : c.name);
+
+function queueSheet(ctx: Ctx, jobId: string, c: { id: string; storyId: string; name: string; desc: string }) {
+  insertJob(ctx, jobId, ctx.sender, c.storyId, 'charsheet', { characterId: c.id, design: designOf(c) });
+}
+
+function sheetInput(cs: { id: string; front: string; side: string; keyColor: string; unit: string }) {
+  let unit: unknown = null;
+  try { unit = cs.unit ? JSON.parse(cs.unit) : null; } catch { /* sem unidade: o worker não alinha */ }
+  return { id: cs.id, front: cs.front, side: cs.side, keyColor: cs.keyColor || null, unit };
+}
+
+function queuePose(ctx: Ctx, jobId: string, requester: Identity, sp: { id: string; storyId: string; characterId: string; name: string; desc: string }) {
+  const c = ctx.db.character.id.find(sp.characterId);
+  const cs = c && c.sheetId ? ctx.db.charsheet.id.find(c.sheetId) : undefined;
+  if (!c || !cs) throw new SenderError('NO_SHEET');
+  insertJob(ctx, jobId, requester, sp.storyId, 'pose', {
+    spriteId: sp.id, characterId: c.id, design: cs.design, pose: sp.desc ? `${sp.name}: ${sp.desc}` : sp.name,
+    hint: `${sp.name} ${sp.desc}`, sheet: sheetInput(cs),
+  });
+}
+
+function editorFor(ctx: Ctx, storyId: string) {
+  aiProvider(ctx.env);
+  requireRole(ctx, storyId, 'editor');
+}
+
+// Personagem novo com IA: o personagem e as poses aparecem já, gerando; o charsheet entra na fila.
+export const generate_character = spacetimedb.reducer(
+  { storyId: t.string(), characterId: t.string(), jobId: t.string(), name: t.string(), desc: t.string(), color: t.string(), poses: t.string() },
+  (ctx, { storyId, characterId, jobId, name, desc, color, poses }) => {
+    editorFor(ctx, storyId);
+    if (!validId(characterId) || !validId(jobId) || !name.trim()) throw new SenderError('INVALID');
+    const cur = ctx.db.character.id.find(characterId);
+    if (cur) {
+      if (cur.storyId === storyId && ctx.db.aiJob.id.find(jobId)) return; // reenvio
+      throw new SenderError('INVALID');
+    }
+    let list: { id: string; name: string; desc?: string }[];
+    try { list = JSON.parse(poses); } catch { throw new SenderError('INVALID'); }
+    if (!Array.isArray(list) || list.length > MAX_POSES || list.some(p => !validId(p?.id) || ctx.db.sprite.id.find(p.id))) throw new SenderError('INVALID');
+    checkRate(ctx);
+    const c = {
+      id: characterId, storyId, name: str(name, 80), desc: str(desc, 2000), color: str(color, 20), source: 'ai', sheetId: '',
+      status: 'generating', error: '', createdAt: ctx.timestamp,
+    };
+    ctx.db.character.insert(c);
+    list.forEach((p, i) => ctx.db.sprite.insert({
+      id: p.id, storyId, characterId, name: str(p.name, 80) || 'Pose', desc: str(p.desc, 1000), imageKey: '', position: i,
+      status: 'pending', error: '', meta: '',
+    }));
+    queueSheet(ctx, jobId, c);
+  }
+);
+
+// Pose nova com IA. Personagem ainda gerando o charsheet: a pose espera (pending) e entra na fila depois.
+export const add_pose = spacetimedb.reducer(
+  { storyId: t.string(), characterId: t.string(), spriteId: t.string(), jobId: t.string(), name: t.string(), desc: t.string() },
+  (ctx, { storyId, characterId, spriteId, jobId, name, desc }) => {
+    editorFor(ctx, storyId);
+    if (!validId(spriteId) || !validId(jobId)) throw new SenderError('INVALID');
+    const c = ctx.db.character.id.find(characterId);
+    if (!c || c.storyId !== storyId) throw new SenderError('NOT_FOUND');
+    if (ctx.db.sprite.id.find(spriteId)) {
+      if (ctx.db.sprite.id.find(spriteId)!.storyId === storyId) return; // reenvio
+      throw new SenderError('INVALID');
+    }
+    if (!c.sheetId && c.status !== 'generating') throw new SenderError('NO_SHEET');
+    const n = [...ctx.db.sprite.characterId.filter(characterId)].length;
+    if (n >= 40) throw new SenderError('INVALID');
+    checkRate(ctx);
+    const sp = {
+      id: spriteId, storyId, characterId, name: str(name, 80) || 'Pose', desc: str(desc, 1000), imageKey: '', position: n,
+      status: c.sheetId ? 'generating' : 'pending', error: '', meta: '',
+    };
+    ctx.db.sprite.insert(sp);
+    if (c.sheetId) queuePose(ctx, jobId, ctx.sender, sp);
+  }
+);
+
+export const generate_background = spacetimedb.reducer(
+  { storyId: t.string(), backgroundId: t.string(), jobId: t.string(), name: t.string(), desc: t.string() },
+  (ctx, { storyId, backgroundId, jobId, name, desc }) => {
+    editorFor(ctx, storyId);
+    if (!validId(backgroundId) || !validId(jobId) || !name.trim()) throw new SenderError('INVALID');
+    const cur = ctx.db.background.id.find(backgroundId);
+    if (cur) {
+      if (cur.storyId === storyId && ctx.db.aiJob.id.find(jobId)) return;
+      throw new SenderError('INVALID');
+    }
+    checkRate(ctx);
+    const b = {
+      id: backgroundId, storyId, name: str(name, 80), desc: str(desc, 2000), imageKey: '', baseKey: '', source: 'ai',
+      status: 'generating', error: '', createdAt: ctx.timestamp,
+    };
+    ctx.db.background.insert(b);
+    insertJob(ctx, jobId, ctx.sender, storyId, 'background', { backgroundId, name: b.name, desc: b.desc });
+  }
+);
+
+// Gera de novo: um charsheet (personagem falhado, ou enviado sem charsheet), uma pose ou um background.
+export const retry_generation = spacetimedb.reducer(
+  { storyId: t.string(), target: t.string(), id: t.string(), jobId: t.string() },
+  (ctx, { storyId, target, id, jobId }) => {
+    editorFor(ctx, storyId);
+    if (!validId(jobId)) throw new SenderError('INVALID');
+    if (ctx.db.aiJob.id.find(jobId)) return; // reenvio
+    if (target === 'character') {
+      const c = ctx.db.character.id.find(id);
+      if (!c || c.storyId !== storyId) throw new SenderError('NOT_FOUND');
+      if (c.status === 'generating') throw new SenderError('BUSY');
+      checkRate(ctx);
+      ctx.db.character.id.update({ ...c, status: 'generating', error: '' });
+      // As poses que falharam por falta do charsheet esperam o novo.
+      for (const sp of [...ctx.db.sprite.characterId.filter(id)])
+        if (sp.status === 'failed' && !sp.imageKey) ctx.db.sprite.id.update({ ...sp, status: 'pending', error: '' });
+      queueSheet(ctx, jobId, c);
+    } else if (target === 'sprite') {
+      const sp = ctx.db.sprite.id.find(id);
+      if (!sp || sp.storyId !== storyId) throw new SenderError('NOT_FOUND');
+      if (sp.status === 'generating' || sp.status === 'pending') throw new SenderError('BUSY');
+      const c = ctx.db.character.id.find(sp.characterId);
+      if (c && !c.sheetId && c.status === 'generating') { ctx.db.sprite.id.update({ ...sp, status: 'pending', error: '' }); return; }
+      checkRate(ctx);
+      queuePose(ctx, jobId, ctx.sender, sp);
+      ctx.db.sprite.id.update({ ...sp, status: 'generating', error: '' });
+    } else if (target === 'background') {
+      const b = ctx.db.background.id.find(id);
+      if (!b || b.storyId !== storyId) throw new SenderError('NOT_FOUND');
+      if (b.status === 'generating') throw new SenderError('BUSY');
+      checkRate(ctx);
+      ctx.db.background.id.update({ ...b, status: 'generating', error: '' });
+      insertJob(ctx, jobId, ctx.sender, storyId, 'background', { backgroundId: id, name: b.name, desc: b.desc });
+    } else throw new SenderError('INVALID');
+  }
+);
+
+// Resultado de um pedido do elenco nas linhas da história. Linha apagada no meio: nada a fazer.
+function onCastJob(ctx: Ctx, j: { id: string; kind: string; input: string; requester: Identity }, result: string | null, error: string) {
+  let input: Record<string, unknown>;
+  try { input = JSON.parse(j.input); } catch { return; }
+  let r: Record<string, any> = {};
+  if (result !== null) { try { r = JSON.parse(result); } catch { throw new SenderError('INVALID'); } }
+  if (j.kind === 'charsheet') {
+    const c = ctx.db.character.id.find(String(input.characterId));
+    if (!c) return;
+    const sh = r.sheet;
+    if (result === null || !sh || !validId(sh.id) || !imageKeyOk(sh.front) || !imageKeyOk(sh.side)) {
+      ctx.db.character.id.update({ ...c, status: 'failed', error: error || 'AI_INVALID_OUTPUT' });
+      for (const sp of [...ctx.db.sprite.characterId.filter(c.id)])
+        if (sp.status === 'pending') ctx.db.sprite.id.update({ ...sp, status: 'failed', error: 'NO_SHEET' });
+      return;
+    }
+    const row = {
+      id: sh.id, storyId: c.storyId, characterId: c.id, design: String(input.design ?? designOf(c)), front: sh.front, side: sh.side,
+      keyColor: String(sh.keyColor ?? ''), keyScores: JSON.stringify(sh.keyScores ?? null), unit: sh.unit ? JSON.stringify(sh.unit) : '', createdAt: ctx.timestamp,
+    };
+    if (ctx.db.charsheet.id.find(row.id)) ctx.db.charsheet.id.update(row);
+    else ctx.db.charsheet.insert(row);
+    ctx.db.character.id.update({ ...c, sheetId: row.id, status: '', error: '' });
+    // Cada pose pendente vira um pedido próprio: uma falha só marca aquela pose.
+    for (const sp of [...ctx.db.sprite.characterId.filter(c.id)]) {
+      if (sp.status !== 'pending') continue;
+      queuePose(ctx, `${j.id}:${sp.id}`.slice(0, 64), j.requester, sp);
+      ctx.db.sprite.id.update({ ...sp, status: 'generating', error: '' });
+    }
+  } else if (j.kind === 'pose') {
+    const sp = ctx.db.sprite.id.find(String(input.spriteId));
+    if (!sp || sp.imageKey && sp.status === '') return; // o autor já enviou uma imagem
+    if (result === null || !r.image_key || !imageKeyOk(r.image_key)) {
+      ctx.db.sprite.id.update({ ...sp, status: 'failed', error: error || 'AI_INVALID_OUTPUT' });
+      return;
+    }
+    ctx.db.sprite.id.update({ ...sp, imageKey: r.image_key, status: '', error: '', meta: JSON.stringify({ path: r.path ?? null, accepted: r.accepted ?? null }) });
+  } else if (j.kind === 'background' && input.backgroundId) {
+    const b = ctx.db.background.id.find(String(input.backgroundId));
+    if (!b || b.status !== 'generating') return;
+    if (result === null || !r.image_key || !imageKeyOk(r.image_key)) {
+      ctx.db.background.id.update({ ...b, status: 'failed', error: error || 'AI_INVALID_OUTPUT' });
+      return;
+    }
+    ctx.db.background.id.update({ ...b, imageKey: r.image_key, baseKey: imageKeyOk(r.base_key) ? String(r.base_key ?? '') : '', status: '', error: '' });
+  }
+}
 
 // ---------- IA: procedures de texto ----------
 // Contexto que o cliente envia (no spike, elenco e backgrounds ficam no cliente).
