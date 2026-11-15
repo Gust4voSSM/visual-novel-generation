@@ -666,7 +666,9 @@ function fadeGhost(d,poof){const g=d.g;if(poof){const r=g.getBoundingClientRect(
   g.style.transition='opacity .22s,height .22s';g.style.opacity='0';setTimeout(()=>g.remove(),240);}
 function flyBack(d){cdrag=null;const s=scene(d.src.sid),i=s?s.chars.findIndex(x=>x.c===d.src.c):-1;if(i<0){fadeGhost(d);renderNodes();return;}
   landGhost(d,s.id,posOf(s,i),renderNodes);}
-function onCharUp(e){const d=cdrag;if(!d||e.pointerId!==d.pid)return;d.px=e.clientX;d.py=e.clientY;if(d.moved)hoverStage();offChar();
+function onCharUp(e){const d=cdrag;if(!d||e.pointerId!==d.pid)return;d.px=e.clientX;d.py=e.clientY;d.alt=e.altKey;if(d.moved)hoverStage();
+  // o ímã é decidido aqui também: sem rAF (aba em segundo plano) o loop não roda
+  const ust=d.moved&&d.over&&d.ok&&stageEl(d.over);if(ust){const r=frameRect(ust);d.snap=snapOnion(d,ust,rawPos(d,r,r.height*SPRITE_H));}offChar();
   if(!d.moved){d.g.remove();cdrag=null;if(d.src.sid){castSel.set(d.src.sid,d.src.c);expanded===d.src.sid?renderNodes():setExpanded(d.src.sid);}return;}
   d.end=true;if(!d.src.sid){railSuppress=true;setTimeout(()=>railSuppress=false,0);}
   if(d.over&&d.ok){dropChar(d);return;}
