@@ -61,19 +61,87 @@ function makeBg(def, src) {
 }
 // Posição no palco, em % do quadro 16:9: x é o centro do sprite, y desce a base (corta mais do corpo).
 // Personagens sem posição (IA, dados antigos) caem nos slots fixos.
+// k: escala do sprite (1 = altura padrão do palco); roda do mouse sobre o personagem muda.
 const SPRITE_H = 0.96,
-  POS_Y_MAX = 45;
+  POS_Y_MAX = 45,
+  K_MIN = 0.4,
+  K_MAX = 2;
+const clampK = (k) => +Math.max(K_MIN, Math.min(K_MAX, k || 1)).toFixed(2);
 function posOf(s, i) {
   const cc = s.chars[i];
-  if (cc.x != null) return { x: cc.x, y: cc.y || 0 };
-  return { x: (SLOTS[s.chars.length] || [])[i] ?? 50, y: 0 };
+  const k = clampK(cc.k);
+  if (cc.x != null) return { x: cc.x, y: cc.y || 0, k };
+  return { x: (SLOTS[s.chars.length] || [])[i] ?? 50, y: 0, k };
 }
 function materialize(s) {
   const ps = s.chars.map((_, i) => posOf(s, i));
   s.chars.forEach((cc, i) => {
     cc.x = ps[i].x;
     cc.y = ps[i].y;
+    if (ps[i].k !== 1) cc.k = ps[i].k;
+    else delete cc.k;
   });
+}
+// Escala do personagem arrastado: a de quando saiu do palco, ou a do onion skin em que encaixou.
+const dk = (d) => (d.snap && !d.alt && d.snap.k ? d.snap.k : clampK(d.src.k));
+// Alça no topo do personagem selecionado: arrastar para cima/baixo redimensiona (um passo de desfazer por gesto).
+let kdrag = null;
+function startScaleDrag(e, hd) {
+  const st = hd.closest('[data-stage]'),
+    sid = st.dataset.stage,
+    s = scene(sid);
+  if (!s || remoteDrag.has(sid)) return;
+  const i = s.chars.findIndex((x) => x.c === hd.dataset.c);
+  if (i < 0) return;
+  e.preventDefault();
+  e.stopPropagation();
+  const fr = st.querySelector('.stage-frame').getBoundingClientRect();
+  const k0 = posOf(s, i).k;
+  kdrag = {
+    pid: e.pointerId,
+    sid,
+    c: hd.dataset.c,
+    y0: e.clientY,
+    k0,
+    k: k0,
+    base: fr.height * SPRITE_H,
+    img: st.querySelector(`.pchar[data-c="${hd.dataset.c}"]`),
+    hd,
+    bottom: -posOf(s, i).y,
+  };
+  document.body.classList.add('kscaling');
+  window.addEventListener('pointermove', onScaleMove);
+  window.addEventListener('pointerup', onScaleUp);
+  window.addEventListener('pointercancel', onScaleUp);
+}
+function onScaleMove(e) {
+  const d = kdrag;
+  if (!d || e.pointerId !== d.pid) return;
+  d.k = clampK(d.k0 + (d.y0 - e.clientY) / d.base);
+  const h = (SPRITE_H * 100 * d.k).toFixed(1) + '%';
+  if (d.img) d.img.style.height = h;
+  d.hd.style.bottom = `calc(${d.bottom}% + ${h})`;
+  d.hd.dataset.pct = Math.round(d.k * 100) + '%';
+}
+function onScaleUp(e) {
+  const d = kdrag;
+  if (!d || e.pointerId !== d.pid) return;
+  kdrag = null;
+  document.body.classList.remove('kscaling');
+  window.removeEventListener('pointermove', onScaleMove);
+  window.removeEventListener('pointerup', onScaleUp);
+  window.removeEventListener('pointercancel', onScaleUp);
+  const s = scene(d.sid);
+  const i = s ? s.chars.findIndex((x) => x.c === d.c) : -1;
+  if (i < 0 || d.k === d.k0) {
+    renderNodes();
+    return;
+  }
+  pushUndo();
+  materialize(s);
+  if (d.k !== 1) s.chars[i].k = d.k;
+  else delete s.chars[i].k;
+  refresh();
 }
 function byX(s) {
   return s.chars
@@ -637,8 +705,13 @@ function stageMini(s) {
     if (hiddenChar(s.id, cc.c)) cls.push('hold');
     if (dlg && cc.c !== s.speaker) cls.push('dim');
     if (sel === cc.c) cls.push('sel');
-    ch += `<img class="${cls.join(' ')}" data-c="${cc.c}" draggable="false" style="left:${p.x}%;bottom:${-p.y}%;${rvOn ? `animation-delay:${180 + i * 110 - rv}ms` : ''}" src="${sp.img}" alt="${esc(c.name)}" title="${esc(c.name)} · arraste para mover">`;
+    ch += `<img class="${cls.join(' ')}" data-c="${cc.c}" draggable="false" style="left:${p.x}%;bottom:${-p.y}%;height:${(SPRITE_H * 100 * p.k).toFixed(1)}%;${rvOn ? `animation-delay:${180 + i * 110 - rv}ms` : ''}" src="${sp.img}" alt="${esc(c.name)}" title="${esc(c.name)} · arraste para mover, clique para a alça de tamanho">`;
   });
+  const si = sel ? s.chars.findIndex((x) => x.c === sel) : -1;
+  if (si >= 0 && !hiddenChar(s.id, sel)) {
+    const p = posOf(s, si);
+    ch += `<div class="khandle" data-c="${sel}" data-pct="${Math.round(p.k * 100)}%" style="left:${p.x}%;bottom:calc(${-p.y}% + ${(SPRITE_H * 100 * p.k).toFixed(1)}%)" title="Arraste para cima ou para baixo para redimensionar" role="slider" aria-label="Tamanho" aria-valuenow="${Math.round(p.k * 100)}"></div>`;
+  }
   return `<div class="stage-mini${rvOn ? ' reveal' : ''}" data-stage="${s.id}">${h}<div class="stage-frame">${ch}</div></div>`;
 }
 function rowFresh(id) {
@@ -1930,6 +2003,11 @@ canvas.addEventListener('pointerdown', (e) => {
     return;
   }
   if (e.button !== 0) return;
+  const khd = !cdrag && e.target.closest('.stage-mini[data-stage] .khandle');
+  if (khd) {
+    startScaleDrag(e, khd);
+    return;
+  }
   const pc = !e.altKey && !cdrag && e.target.closest('.stage-mini[data-stage] .pchar');
   if (pc) {
     const sid = pc.closest('[data-stage]').dataset.stage,
@@ -1943,7 +2021,7 @@ canvas.addEventListener('pointerdown', (e) => {
       if (document.activeElement && nodesEl.contains(document.activeElement))
         document.activeElement.blur();
       const r = pc.getBoundingClientRect();
-      startCharDrag(e, { sid, c: cc.c, s: cc.s }, pc.src, {
+      startCharDrag(e, { sid, c: cc.c, s: cc.s, k: clampK(cc.k) }, pc.src, {
         ax: r.left + r.width / 2,
         ay: r.bottom,
         h: r.height,
@@ -2601,7 +2679,7 @@ function renderRail() {
           .map((c) => {
             const o = openCards.has(c.id);
             const av = readySprites(c)[0];
-            return `<div class="card${cardFresh(c.id, c.source)}" data-c="${c.id}"><div class="card-row" data-toggle>${av ? `<img class="avatar" src="${esc(av.img)}" alt="">` : artOf({ status: c.status === 'failed' ? 'failed' : 'generating', error: c.error }, 'avatar')}<div style="min-width:0;flex:1"><div class="card-name"><span class="swatch" style="background:${c.color || 'transparent'}"></span><span style="color:${c.color || 'inherit'}">${esc(c.name)}</span></div><div class="card-sub">${charSub(c)}</div></div><span class="chev">${o ? '−' : '+'}</span></div>
+            return `<div class="card${cardFresh(c.id, c.source)}" data-c="${c.id}"><div class="card-row" data-toggle>${av ? `<img class="avatar" src="${esc(av.img)}" alt="">` : c.status === 'failed' ? artOf({ status: 'failed', error: c.error }, 'avatar') : busy(c) || c.sprites.some(busy) ? artOf({ status: 'generating' }, 'avatar') : '<span class="avatar" title="Sem sprites"></span>'}<div style="min-width:0;flex:1"><div class="card-name"><span class="swatch" style="background:${c.color || 'transparent'}"></span><span style="color:${c.color || 'inherit'}">${esc(c.name)}</span></div><div class="card-sub">${charSub(c)}</div></div><span class="chev">${o ? '−' : '+'}</span></div>
       ${
         o
           ? `<div class="card-edit">${genLine(c, 'o charsheet', 'c:' + c.id)}<label class="field"><span class="lbl">nome</span><input class="inp" data-cf="name" value="${esc(c.name)}"></label>
@@ -3066,7 +3144,7 @@ function onionOf(sid, c) {
         q.titles.push(o.title);
         continue;
       }
-      out.push({ x: p.x, y: p.y, img: sp.img, dir, titles: [o.title] });
+      out.push({ x: p.x, y: p.y, k: p.k, img: sp.img, dir, titles: [o.title] });
     }
   return out;
 }
@@ -3083,6 +3161,8 @@ function paintOnion(st, sid, c) {
     el.draggable = false;
     el.dataset.x = o.x;
     el.dataset.y = o.y;
+    el.dataset.k = o.k;
+    el.style.height = (SPRITE_H * 100 * o.k).toFixed(1) + '%';
     el.style.left = o.x + '%';
     el.style.bottom = -o.y + '%';
     el.title =
@@ -3106,13 +3186,15 @@ function rawPos(d, r, h) {
     ay = d.py + d.oy * h;
   return { x: ((ax - r.left) / r.width) * 100, y: ((ay - r.bottom) / r.height) * 100 };
 }
-function snapOnion(d, st, p) {
+// Cada onion é medido no tamanho dele: o fantasma, ao encaixar, assume essa escala, e a base fica onde ela ficaria.
+function snapOnion(d, st, r) {
   let best = null,
     bd = 1e9;
   st.querySelectorAll('.onion').forEach((o) => {
     o.classList.remove('hit');
     if (d.alt) return;
-    const dx = Math.abs(+o.dataset.x - p.x),
+    const p = rawPos(d, r, r.height * SPRITE_H * (+o.dataset.k || 1)),
+      dx = Math.abs(+o.dataset.x - p.x),
       dy = Math.abs(+o.dataset.y - p.y);
     if (dx <= SNAP_X && dy <= SNAP_Y && dx + dy < bd) {
       bd = dx + dy;
@@ -3121,13 +3203,13 @@ function snapOnion(d, st, p) {
   });
   if (!best) return null;
   best.classList.add('hit');
-  return { x: +best.dataset.x, y: +best.dataset.y };
+  return { x: +best.dataset.x, y: +best.dataset.y, k: +best.dataset.k || 1 };
 }
 function charLoop() {
   const d = cdrag;
   if (!d || d.end) return;
   hoverStage();
-  const th = d.over && d.ok ? frameRect(stageEl(d.over)).height * SPRITE_H : d.free;
+  const th = d.over && d.ok ? frameRect(stageEl(d.over)).height * SPRITE_H * dk(d) : d.free;
   d.h += (th - d.h) * 0.28;
   d.ax = d.px + d.ox * d.h;
   d.ay = d.py + d.oy * d.h;
@@ -3135,7 +3217,7 @@ function charLoop() {
   const ost = d.over && d.ok && stageEl(d.over);
   if (ost) {
     const r = frameRect(ost),
-      sn = snapOnion(d, ost, rawPos(d, r, r.height * SPRITE_H));
+      sn = snapOnion(d, ost, r);
     if (sn) {
       d.snap = sn;
       const tx = r.left + (sn.x / 100) * r.width,
@@ -3200,7 +3282,7 @@ function landGhost(d, sid, pos, done) {
       q = easeOut(k);
     d.ax = a0.ax + (r.left + (pos.x / 100) * r.width - a0.ax) * q;
     d.ay = a0.ay + (r.bottom + (pos.y / 100) * r.height - a0.ay) * q;
-    d.h = a0.h + (r.height * SPRITE_H - a0.h) * q;
+    d.h = a0.h + (r.height * SPRITE_H * (pos.k || 1) - a0.h) * q;
     paintGhost(d, st.getBoundingClientRect(), easeInOut(k));
     if (k < 1) requestAnimationFrame(step);
     else finish();
@@ -3240,7 +3322,7 @@ function onCharUp(e) {
   const ust = d.moved && d.over && d.ok && stageEl(d.over);
   if (ust) {
     const r = frameRect(ust);
-    d.snap = snapOnion(d, ust, rawPos(d, r, r.height * SPRITE_H));
+    d.snap = snapOnion(d, ust, r);
   }
   if (d.moved) sendCharDrag(d, true);
   offChar();
@@ -3315,7 +3397,7 @@ function dropChar(d) {
     return;
   }
   const r = frameRect(stageEl(s.id)),
-    th = r.height * SPRITE_H,
+    th = r.height * SPRITE_H * dk(d),
     ax = d.px + d.ox * th,
     ay = d.py + d.oy * th;
   const pos =
@@ -3324,6 +3406,7 @@ function dropChar(d) {
       : {
           x: +Math.max(2, Math.min(98, ((ax - r.left) / r.width) * 100)).toFixed(1),
           y: +Math.max(0, Math.min(POS_Y_MAX, ((ay - r.bottom) / r.height) * 100)).toFixed(1),
+          k: dk(d),
         };
   pushUndo();
   materialize(s);
@@ -3344,6 +3427,8 @@ function dropChar(d) {
   }
   cc.x = pos.x;
   cc.y = pos.y;
+  if (pos.k && pos.k !== 1) cc.k = pos.k;
+  else delete cc.k;
   s.chars.push(cc); // por último = na frente
   castSel.set(s.id, cc.c);
   cdrag = null;
@@ -4376,7 +4461,7 @@ function drawPlay() {
         sp = spriteOf(c, cc.s),
         p = posOf(s, i);
       return sp
-        ? `<img class="schar${dlg && cc.c !== s.speaker ? ' dim' : ''}" style="left:${p.x}%;bottom:${-p.y}%;animation-delay:${i * 90}ms" src="${sp.img}" alt="${esc(c.name)} (${esc(sp.name)})">`
+        ? `<img class="schar${dlg && cc.c !== s.speaker ? ' dim' : ''}" style="left:${p.x}%;bottom:${-p.y}%;height:${(SPRITE_H * 100 * p.k).toFixed(1)}%;animation-delay:${i * 90}ms" src="${sp.img}" alt="${esc(c.name)} (${esc(sp.name)})">`
         : '';
     })
     .join('');
@@ -4499,9 +4584,11 @@ function flatOf(st) {
       y: Math.round(s.y),
       bg: s.bg || '',
       chars: JSON.stringify(
-        s.chars.map((x) =>
-          x.x != null ? { c: x.c, s: x.s, x: x.x, y: x.y || 0 } : { c: x.c, s: x.s },
-        ),
+        s.chars.map((x) => {
+          const o = x.x != null ? { c: x.c, s: x.s, x: x.x, y: x.y || 0 } : { c: x.c, s: x.s };
+          if (x.k && x.k !== 1) o.k = clampK(x.k);
+          return o;
+        }),
       ),
       kind: s.kind,
       speaker: s.speaker || '',
@@ -5022,17 +5109,15 @@ function migrateLegacyCast() {
     }
     if (o.background) o.background.id = re(o.background.id);
   }
-  const scenes = rows
-    .filter(uses)
-    .map((s) => ({
-      op: 'upsert_scene',
-      scene: {
-        id: s.id,
-        bg: re(s.bg),
-        speaker: re(s.speaker),
-        chars: JSON.stringify(castOf(s).map((x) => ({ c: re(x.c), s: re(x.s) }))),
-      },
-    }));
+  const scenes = rows.filter(uses).map((s) => ({
+    op: 'upsert_scene',
+    scene: {
+      id: s.id,
+      bg: re(s.bg),
+      speaker: re(s.speaker),
+      chars: JSON.stringify(castOf(s).map((x) => ({ c: re(x.c), s: re(x.s) }))),
+    },
+  }));
   conn.reducers.applyOperations({ storyId, ops: JSON.stringify([...cast, ...scenes]) }).then(
     () => toast('O elenco desta história agora fica salvo no servidor.'),
     (err) => {
@@ -5143,10 +5228,11 @@ function sendCharDrag(d, done, cancel) {
   let pos = null;
   if (st) {
     const r = frameRect(st),
-      q = d.snap && !d.alt ? d.snap : rawPos(d, r, r.height * SPRITE_H);
+      q = d.snap && !d.alt ? d.snap : rawPos(d, r, r.height * SPRITE_H * dk(d));
     pos = {
       x: +Math.max(2, Math.min(98, q.x)).toFixed(1),
       y: +Math.max(0, Math.min(POS_Y_MAX, q.y)).toFixed(1),
+      k: dk(d),
     };
   }
   const w = toWorld(d.px + d.ox * d.h, d.py + d.oy * d.h); // do ponteiro: d.ax/ay só andam com o rAF
@@ -5157,6 +5243,7 @@ function sendCharDrag(d, done, cancel) {
     over: pos ? d.over : '',
     x: pos ? pos.x : 0,
     y: pos ? pos.y : 0,
+    k: pos ? pos.k : 1,
     wx: Math.round(w.x),
     wy: Math.round(w.y),
     wh: Math.round(d.h / view.z),
@@ -5210,7 +5297,7 @@ function remoteCharTarget(p) {
     return {
       x: r.left + (p.x / 100) * r.width,
       y: r.bottom + (p.y / 100) * r.height,
-      h: r.height * SPRITE_H,
+      h: r.height * SPRITE_H * (p.k || 1),
     };
   }
   const cr = canvas.getBoundingClientRect();
