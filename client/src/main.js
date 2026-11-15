@@ -17,9 +17,25 @@ function makeChar(def,src){
 function makeBg(def,src){const imageKey=bgKey(def.slug);return{id:uid('b'),name:def.name,desc:def.desc,source:src||'example',imageKey,img:imgUrl(imageKey),status:'',error:''};}
 // Posição no palco, em % do quadro 16:9: x é o centro do sprite, y desce a base (corta mais do corpo).
 // Personagens sem posição (IA, dados antigos) caem nos slots fixos.
-const SPRITE_H=.96,POS_Y_MAX=45;
-function posOf(s,i){const cc=s.chars[i];if(cc.x!=null)return{x:cc.x,y:cc.y||0};return{x:(SLOTS[s.chars.length]||[])[i]??50,y:0};}
-function materialize(s){const ps=s.chars.map((_,i)=>posOf(s,i));s.chars.forEach((cc,i)=>{cc.x=ps[i].x;cc.y=ps[i].y;});}
+// k: escala do sprite (1 = altura padrão do palco); roda do mouse sobre o personagem muda.
+const SPRITE_H=.96,POS_Y_MAX=45,K_MIN=.4,K_MAX=2;
+const clampK=k=>+Math.max(K_MIN,Math.min(K_MAX,k||1)).toFixed(2);
+function posOf(s,i){const cc=s.chars[i];const k=clampK(cc.k);if(cc.x!=null)return{x:cc.x,y:cc.y||0,k};return{x:(SLOTS[s.chars.length]||[])[i]??50,y:0,k};}
+function materialize(s){const ps=s.chars.map((_,i)=>posOf(s,i));s.chars.forEach((cc,i)=>{cc.x=ps[i].x;cc.y=ps[i].y;if(ps[i].k!==1)cc.k=ps[i].k;else delete cc.k;});}
+// Escala do personagem arrastado: a de quando saiu do palco, ou a do onion skin em que encaixou.
+const dk=d=>d.snap&&!d.alt&&d.snap.k?d.snap.k:clampK(d.src.k);
+// Alça no topo do personagem selecionado: arrastar para cima/baixo redimensiona (um passo de desfazer por gesto).
+let kdrag=null;
+function startScaleDrag(e,hd){const st=hd.closest('[data-stage]'),sid=st.dataset.stage,s=scene(sid);if(!s||remoteDrag.has(sid))return;const i=s.chars.findIndex(x=>x.c===hd.dataset.c);if(i<0)return;
+  e.preventDefault();e.stopPropagation();const fr=st.querySelector('.stage-frame').getBoundingClientRect();const k0=posOf(s,i).k;
+  kdrag={pid:e.pointerId,sid,c:hd.dataset.c,y0:e.clientY,k0,k:k0,base:fr.height*SPRITE_H,img:st.querySelector(`.pchar[data-c="${hd.dataset.c}"]`),hd,bottom:-posOf(s,i).y};
+  document.body.classList.add('kscaling');window.addEventListener('pointermove',onScaleMove);window.addEventListener('pointerup',onScaleUp);window.addEventListener('pointercancel',onScaleUp);}
+function onScaleMove(e){const d=kdrag;if(!d||e.pointerId!==d.pid)return;d.k=clampK(d.k0+(d.y0-e.clientY)/d.base);const h=(SPRITE_H*100*d.k).toFixed(1)+'%';
+  if(d.img)d.img.style.height=h;d.hd.style.bottom=`calc(${d.bottom}% + ${h})`;d.hd.dataset.pct=Math.round(d.k*100)+'%';}
+function onScaleUp(e){const d=kdrag;if(!d||e.pointerId!==d.pid)return;kdrag=null;document.body.classList.remove('kscaling');
+  window.removeEventListener('pointermove',onScaleMove);window.removeEventListener('pointerup',onScaleUp);window.removeEventListener('pointercancel',onScaleUp);
+  const s=scene(d.sid);const i=s?s.chars.findIndex(x=>x.c===d.c):-1;if(i<0||d.k===d.k0){renderNodes();return;}
+  pushUndo();materialize(s);if(d.k!==1)s.chars[i].k=d.k;else delete s.chars[i].k;refresh();}
 function byX(s){return s.chars.map((cc,i)=>({cc,x:posOf(s,i).x})).sort((a,b)=>a.x-b.x).map(o=>o.cc);}
 // Quem fala sai da cena: passa a fala para quem está na frente, ou vira narração se o palco esvaziou.
 function fixSpeaker(s){if(s.kind!=='dialogue'||s.chars.some(x=>x.c===s.speaker))return;if(s.chars.length){s.speaker=s.chars[s.chars.length-1].c;return;}s.kind='narration';s.speaker=null;toast('A cena ficou sem personagens; o texto virou narração.');}
@@ -163,7 +179,8 @@ function stageMini(s){const bg=bgById(s.bg);const g=genOf(s);
   let h=bg&&bg.img?`<img class="bgimg" src="${bg.img}" alt="" ${rvOn?`style="animation-delay:-${rv}ms"`:''}>`:`<div class="nobg">sem background</div>`;
   const dlg=s.kind==='dialogue'&&s.speaker,sel=expanded===s.id?castSelOf(s):null;let ch='';
   s.chars.forEach((cc,i)=>{const c=charById(cc.c),sp=spriteOf(c,cc.s);if(!sp||!sp.img)return;const p=posOf(s,i);const cls=['pchar'];if(hiddenChar(s.id,cc.c))cls.push('hold');if(dlg&&cc.c!==s.speaker)cls.push('dim');if(sel===cc.c)cls.push('sel');
-    ch+=`<img class="${cls.join(' ')}" data-c="${cc.c}" draggable="false" style="left:${p.x}%;bottom:${-p.y}%;${rvOn?`animation-delay:${180+i*110-rv}ms`:''}" src="${sp.img}" alt="${esc(c.name)}" title="${esc(c.name)} · arraste para mover">`;});
+    ch+=`<img class="${cls.join(' ')}" data-c="${cc.c}" draggable="false" style="left:${p.x}%;bottom:${-p.y}%;height:${(SPRITE_H*100*p.k).toFixed(1)}%;${rvOn?`animation-delay:${180+i*110-rv}ms`:''}" src="${sp.img}" alt="${esc(c.name)}" title="${esc(c.name)} · arraste para mover, clique para a alça de tamanho">`;});
+  const si=sel?s.chars.findIndex(x=>x.c===sel):-1;if(si>=0&&!hiddenChar(s.id,sel)){const p=posOf(s,si);ch+=`<div class="khandle" data-c="${sel}" data-pct="${Math.round(p.k*100)}%" style="left:${p.x}%;bottom:calc(${-p.y}% + ${(SPRITE_H*100*p.k).toFixed(1)}%)" title="Arraste para cima ou para baixo para redimensionar" role="slider" aria-label="Tamanho" aria-valuenow="${Math.round(p.k*100)}"></div>`;}
   return`<div class="stage-mini${rvOn?' reveal':''}" data-stage="${s.id}">${h}<div class="stage-frame">${ch}</div></div>`;}
 function rowFresh(id){const t=freshRows.get(id);if(t==null)return'';const a=ago(t);if(a>700){freshRows.delete(id);return'';}return` fresh" style="animation-delay:-${a}ms`;}
 function nodeHTML(s,ws,reach,lnk,incoming){const g=genOf(s);const isStart=state.start===s.id;const exp=expanded===s.id&&!g;
@@ -399,10 +416,11 @@ canvas.addEventListener('pointerdown',e=>{if(e.target.closest('.hud,.hudpop,.zoo
     return;}
   if(e.button===2||e.button===1||(e.button===0&&spaceDown)||(touch&&!e.target.closest('.node'))){e.preventDefault();if(touch)canvas.focus({preventScroll:true});drag={type:'pan',pid:e.pointerId,touch,moved:false,cx:e.clientX,cy:e.clientY,vx:view.x,vy:view.y};canvas.classList.add('panning');canvas.setPointerCapture(e.pointerId);return;}
   if(e.button!==0)return;
+  const khd=!cdrag&&e.target.closest('.stage-mini[data-stage] .khandle');if(khd){startScaleDrag(e,khd);return;}
   const pc=!e.altKey&&!cdrag&&e.target.closest('.stage-mini[data-stage] .pchar');
   if(pc){const sid=pc.closest('[data-stage]').dataset.stage,s=scene(sid),cc=s&&s.chars.find(x=>x.c===pc.dataset.c);
     if(cc){if(remoteDrag.has(sid)){toast(`${remoteDrag.get(sid).name} está movendo esta cena.`,'err');return;}if(document.activeElement&&nodesEl.contains(document.activeElement))document.activeElement.blur();
-      const r=pc.getBoundingClientRect();startCharDrag(e,{sid,c:cc.c,s:cc.s},pc.src,{ax:r.left+r.width/2,ay:r.bottom,h:r.height,clip:1,free:r.height});return;}}
+      const r=pc.getBoundingClientRect();startCharDrag(e,{sid,c:cc.c,s:cc.s,k:clampK(cc.k)},pc.src,{ax:r.left+r.width/2,ay:r.bottom,h:r.height,clip:1,free:r.height});return;}}
   if(e.altKey){e.preventDefault();const p=toWorld(e.clientX,e.clientY);drag={type:'cut',x1:p.x,y1:p.y,x2:p.x,y2:p.y};canvas.setPointerCapture(e.pointerId);return;}
   const nodeHit=e.target.closest('.node');const titleHit=e.target.closest('.ntitle');
   if(nodeHit&&!(titleHit&&document.activeElement===titleHit)&&(titleHit||!e.target.closest('textarea,select,button,input,label,.menu,.port'))){e.preventDefault();if(document.activeElement&&nodesEl.contains(document.activeElement))document.activeElement.blur();const id=nodeHit.dataset.id;if(remoteDrag.has(id)){toast(`${remoteDrag.get(id).name} está movendo esta cena.`,'err');return;}if(touch&&selectMode);// no modo de seleção o toque só marca/desmarca ao soltar
@@ -629,22 +647,23 @@ function neighbors(sid){const s=scene(sid);const prev=state.scenes.filter(o=>o.i
 function onionOf(sid,c){const out=[];const{prev,next}=neighbors(sid);
   for(const[dir,list]of[['prev',prev],['next',next]])for(const o of list){const i=o.chars.findIndex(x=>x.c===c);if(i<0)continue;const sp=spriteOf(charById(c),o.chars[i].s);if(!sp)continue;
     const p=posOf(o,i);if(out.some(q=>Math.abs(q.x-p.x)<.5&&Math.abs(q.y-p.y)<.5)){const q=out.find(q=>Math.abs(q.x-p.x)<.5&&Math.abs(q.y-p.y)<.5);if(q.dir!==dir)q.dir='both';q.titles.push(o.title);continue;}
-    out.push({x:p.x,y:p.y,img:sp.img,dir,titles:[o.title]});}
+    out.push({x:p.x,y:p.y,k:p.k,img:sp.img,dir,titles:[o.title]});}
   return out;}
 function paintOnion(st,sid,c){clearOnion(st);const fr=st.querySelector('.stage-frame');if(!fr)return;st.dataset.onion=c;
-  for(const o of onionOf(sid,c)){const el=document.createElement('img');el.className='onion '+o.dir;el.src=o.img;el.alt='';el.draggable=false;el.dataset.x=o.x;el.dataset.y=o.y;
+  for(const o of onionOf(sid,c)){const el=document.createElement('img');el.className='onion '+o.dir;el.src=o.img;el.alt='';el.draggable=false;el.dataset.x=o.x;el.dataset.y=o.y;el.dataset.k=o.k;el.style.height=(SPRITE_H*100*o.k).toFixed(1)+'%';
     el.style.left=o.x+'%';el.style.bottom=-o.y+'%';el.title=(o.dir==='next'?'na cena seguinte: ':o.dir==='prev'?'na cena anterior: ':'nas cenas vizinhas: ')+o.titles.join(', ');fr.prepend(el);}}
 function clearOnion(st){delete st.dataset.onion;st.querySelectorAll('.onion').forEach(x=>x.remove());}
 // Atrai para a posição de uma cena vizinha quando perto (Alt solta o ímã).
 const SNAP_X=4,SNAP_Y=6;
 function rawPos(d,r,h){const ax=d.px+d.ox*h,ay=d.py+d.oy*h;return{x:(ax-r.left)/r.width*100,y:(ay-r.bottom)/r.height*100};}
-function snapOnion(d,st,p){let best=null,bd=1e9;st.querySelectorAll('.onion').forEach(o=>{o.classList.remove('hit');if(d.alt)return;const dx=Math.abs(+o.dataset.x-p.x),dy=Math.abs(+o.dataset.y-p.y);
+// Cada onion é medido no tamanho dele: o fantasma, ao encaixar, assume essa escala, e a base fica onde ela ficaria.
+function snapOnion(d,st,r){let best=null,bd=1e9;st.querySelectorAll('.onion').forEach(o=>{o.classList.remove('hit');if(d.alt)return;const p=rawPos(d,r,r.height*SPRITE_H*(+o.dataset.k||1)),dx=Math.abs(+o.dataset.x-p.x),dy=Math.abs(+o.dataset.y-p.y);
     if(dx<=SNAP_X&&dy<=SNAP_Y&&dx+dy<bd){bd=dx+dy;best=o;}});
-  if(!best)return null;best.classList.add('hit');return{x:+best.dataset.x,y:+best.dataset.y};}
+  if(!best)return null;best.classList.add('hit');return{x:+best.dataset.x,y:+best.dataset.y,k:+best.dataset.k||1};}
 function charLoop(){const d=cdrag;if(!d||d.end)return;hoverStage();
-  const th=d.over&&d.ok?frameRect(stageEl(d.over)).height*SPRITE_H:d.free;d.h+=(th-d.h)*.28;
+  const th=d.over&&d.ok?frameRect(stageEl(d.over)).height*SPRITE_H*dk(d):d.free;d.h+=(th-d.h)*.28;
   d.ax=d.px+d.ox*d.h;d.ay=d.py+d.oy*d.h;d.snap=null;
-  const ost=d.over&&d.ok&&stageEl(d.over);if(ost){const r=frameRect(ost),sn=snapOnion(d,ost,rawPos(d,r,r.height*SPRITE_H));
+  const ost=d.over&&d.ok&&stageEl(d.over);if(ost){const r=frameRect(ost),sn=snapOnion(d,ost,r);
     if(sn){d.snap=sn;const tx=r.left+sn.x/100*r.width,ty=r.bottom+sn.y/100*r.height;d.sax=(d.sax??d.ax)+(tx-(d.sax??d.ax))*.45;d.say=(d.say??d.ay)+(ty-(d.say??d.ay))*.45;d.ax=d.sax;d.ay=d.say;}else d.sax=d.say=null;}
   if(d.clip>0)d.clip=Math.max(0,d.clip-.09);const src=d.clip>0&&d.src.sid&&stageEl(d.src.sid);
   paintGhost(d,src&&src.getBoundingClientRect(),easeInOut(d.clip));sendCharDrag(d,false);requestAnimationFrame(charLoop);}
@@ -658,7 +677,7 @@ function landGhost(d,sid,pos,done){const a0={ax:d.ax,ay:d.ay,h:d.h},t0=performan
   // sem rAF (aba em segundo plano) o pouso termina pelo relógio, para o sprite real não ficar oculto
   const finish=()=>{if(fin)return;fin=true;if(landing===me)landing=null;done();requestAnimationFrame(()=>d.g.remove());setTimeout(()=>d.g.remove(),80);};
   const step=t=>{if(fin)return;const st=stageEl(sid);if(!st){finish();return;}const r=frameRect(st),k=Math.min(1,(t-t0)/D),q=easeOut(k);
-    d.ax=a0.ax+(r.left+pos.x/100*r.width-a0.ax)*q;d.ay=a0.ay+(r.bottom+pos.y/100*r.height-a0.ay)*q;d.h=a0.h+(r.height*SPRITE_H-a0.h)*q;
+    d.ax=a0.ax+(r.left+pos.x/100*r.width-a0.ax)*q;d.ay=a0.ay+(r.bottom+pos.y/100*r.height-a0.ay)*q;d.h=a0.h+(r.height*SPRITE_H*(pos.k||1)-a0.h)*q;
     paintGhost(d,st.getBoundingClientRect(),easeInOut(k));
     if(k<1)requestAnimationFrame(step);else finish();};
   requestAnimationFrame(step);setTimeout(finish,D+250);}
@@ -668,7 +687,7 @@ function flyBack(d){cdrag=null;const s=scene(d.src.sid),i=s?s.chars.findIndex(x=
   landGhost(d,s.id,posOf(s,i),renderNodes);}
 function onCharUp(e){const d=cdrag;if(!d||e.pointerId!==d.pid)return;d.px=e.clientX;d.py=e.clientY;d.alt=e.altKey;if(d.moved)hoverStage();
   // o ímã é decidido aqui também: sem rAF (aba em segundo plano) o loop não roda
-  const ust=d.moved&&d.over&&d.ok&&stageEl(d.over);if(ust){const r=frameRect(ust);d.snap=snapOnion(d,ust,rawPos(d,r,r.height*SPRITE_H));}if(d.moved)sendCharDrag(d,true);offChar();
+  const ust=d.moved&&d.over&&d.ok&&stageEl(d.over);if(ust){const r=frameRect(ust);d.snap=snapOnion(d,ust,r);}if(d.moved)sendCharDrag(d,true);offChar();
   if(!d.moved){d.g.remove();cdrag=null;if(d.src.sid){castSel.set(d.src.sid,d.src.c);expanded===d.src.sid?renderNodes():setExpanded(d.src.sid);}return;}
   d.end=true;if(!d.src.sid){railSuppress=true;setTimeout(()=>railSuppress=false,0);}
   if(d.over&&d.ok){dropChar(d);return;}
@@ -679,12 +698,12 @@ function onCharUp(e){const d=cdrag;if(!d||e.pointerId!==d.pid)return;d.px=e.clie
   const s=scene(d.src.sid);cdrag=null;if(s&&s.chars.some(x=>x.c===d.src.c)){pushUndo();materialize(s);s.chars=s.chars.filter(x=>x.c!==d.src.c);fixSpeaker(s);refresh();}else renderNodes();fadeGhost(d,true);}
 function onCharCancel(e){const d=cdrag;if(!d||e.pointerId!==d.pid)return;if(d.moved)sendCharDrag(d,true,true);offChar();d.end=true;if(d.moved&&d.src.sid){flyBack(d);return;}cdrag=null;d.g.remove();renderNodes();}
 function dropChar(d){const s=scene(d.over);if(!s){cdrag=null;fadeGhost(d);renderNodes();return;}
-  const r=frameRect(stageEl(s.id)),th=r.height*SPRITE_H,ax=d.px+d.ox*th,ay=d.py+d.oy*th;
-  const pos=d.snap&&!d.alt?{...d.snap}:{x:+Math.max(2,Math.min(98,(ax-r.left)/r.width*100)).toFixed(1),y:+Math.max(0,Math.min(POS_Y_MAX,(ay-r.bottom)/r.height*100)).toFixed(1)};
+  const r=frameRect(stageEl(s.id)),th=r.height*SPRITE_H*dk(d),ax=d.px+d.ox*th,ay=d.py+d.oy*th;
+  const pos=d.snap&&!d.alt?{...d.snap}:{x:+Math.max(2,Math.min(98,(ax-r.left)/r.width*100)).toFixed(1),y:+Math.max(0,Math.min(POS_Y_MAX,(ay-r.bottom)/r.height*100)).toFixed(1),k:dk(d)};
   pushUndo();materialize(s);let cc=s.chars.find(x=>x.c===d.src.c);
   if(d.src.sid&&d.src.sid!==s.id){const o=scene(d.src.sid);if(o){const old=o.chars.find(x=>x.c===d.src.c);materialize(o);o.chars=o.chars.filter(x=>x!==old);fixSpeaker(o);}}
   if(cc)s.chars=s.chars.filter(x=>x!==cc);else{cc={c:d.src.c,s:d.src.s};freshRows.set('cast:'+s.id+':'+cc.c,performance.now());}
-  cc.x=pos.x;cc.y=pos.y;s.chars.push(cc);// por último = na frente
+  cc.x=pos.x;cc.y=pos.y;if(pos.k&&pos.k!==1)cc.k=pos.k;else delete cc.k;s.chars.push(cc);// por último = na frente
   castSel.set(s.id,cc.c);cdrag=null;
   landGhost(d,s.id,pos,renderNodes);refresh();}
 function publish(kind,item){const copy=JSON.parse(JSON.stringify(item));copy.id=uid(kind==='chars'?'c':'b');copy.author='@você';copy.source='marketplace';if(kind==='chars')copy.sprites.forEach(s=>s.id=uid('sp'));market[kind==='chars'?'characters':'backgrounds'].unshift(copy);toast(`“${item.name}” publicado no marketplace`);}
@@ -939,7 +958,7 @@ function openPlay(from){const st=from||state.start;if(!scene(st)){toast('Defina 
 function closePlay(){if(play){clearInterval(play.iv);play.el.remove();play=null;}}
 function go(t){if(!t){toast('Esta ação não tem destino (rascunho). No player público ela fica oculta.','err');return;}play.hist.push(play.cur);play.cur=t;drawPlay();}
 function drawPlay(){clearInterval(play.iv);const s=scene(play.cur);const bg=bgById(s.bg);const dlg=s.kind==='dialogue'&&s.speaker;
-  const chars=s.chars.map((cc,i)=>{const c=charById(cc.c),sp=spriteOf(c,cc.s),p=posOf(s,i);return sp?`<img class="schar${dlg&&cc.c!==s.speaker?' dim':''}" style="left:${p.x}%;bottom:${-p.y}%;animation-delay:${i*90}ms" src="${sp.img}" alt="${esc(c.name)} (${esc(sp.name)})">`:''}).join('');
+  const chars=s.chars.map((cc,i)=>{const c=charById(cc.c),sp=spriteOf(c,cc.s),p=posOf(s,i);return sp?`<img class="schar${dlg&&cc.c!==s.speaker?' dim':''}" style="left:${p.x}%;bottom:${-p.y}%;height:${(SPRITE_H*100*p.k).toFixed(1)}%;animation-delay:${i*90}ms" src="${sp.img}" alt="${esc(c.name)} (${esc(sp.name)})">`:''}).join('');
   const spk=s.kind==='dialogue'?charById(s.speaker):null;
   const box=s.text?(spk?`<div class="tbox dialogue"><div class="nametag" style="color:${spk.color||'var(--text)'}">${esc(spk.name)}</div><span data-t></span><span class="tcaret"></span></div>`:`<div class="tbox narration"><span><span data-t></span><span class="tcaret"></span></span></div>`):'';
   play.el.innerHTML=`<div class="phead"><span>${esc(state.title)} · ${esc(s.title)}</span><span class="grow"></span><button class="pbtn" data-back ${play.hist.length?'':'disabled'}>Voltar</button><button class="pbtn" data-restart>Reiniciar</button><button class="pbtn" data-exit>Voltar ao editor</button></div><div class="stage"><div class="pic">${bg?`<img class="bgimg" src="${bg.img}" alt="${esc(bg.name)}">`:''}${chars}</div>${box}<div data-after></div></div>`;
@@ -978,7 +997,7 @@ const emptyFlat=()=>({title:'',start:'',scenes:new Map,choices:new Map,chars:new
 const cloneMap=m=>new Map([...m].map(([k,v])=>[k,{...v}]));
 const cloneFlat=f=>({title:f.title,start:f.start,scenes:cloneMap(f.scenes),choices:cloneMap(f.choices),chars:cloneMap(f.chars),sprites:cloneMap(f.sprites),bgs:cloneMap(f.bgs)});
 function flatOf(st){const f=emptyFlat();f.title=st.title;f.start=st.start||'';
-  for(const s of st.scenes){f.scenes.set(s.id,{title:s.title,x:Math.round(s.x),y:Math.round(s.y),bg:s.bg||'',chars:JSON.stringify(s.chars.map(x=>x.x!=null?{c:x.c,s:x.s,x:x.x,y:x.y||0}:{c:x.c,s:x.s})),kind:s.kind,speaker:s.speaker||'',text:s.text,next:s.next||'',ai:gens.has(s.id)?'generating':(s.aiStatus==='failed'&&s.text?'':(s.aiStatus||''))});
+  for(const s of st.scenes){f.scenes.set(s.id,{title:s.title,x:Math.round(s.x),y:Math.round(s.y),bg:s.bg||'',chars:JSON.stringify(s.chars.map(x=>{const o=x.x!=null?{c:x.c,s:x.s,x:x.x,y:x.y||0}:{c:x.c,s:x.s};if(x.k&&x.k!==1)o.k=clampK(x.k);return o;})),kind:s.kind,speaker:s.speaker||'',text:s.text,next:s.next||'',ai:gens.has(s.id)?'generating':(s.aiStatus==='failed'&&s.text?'':(s.aiStatus||''))});
     s.choices.forEach((c,i)=>f.choices.set(c.id,{sceneId:s.id,label:c.label,target:c.target||'',position:i}));}
   for(const c of st.characters||[]){f.chars.set(c.id,{name:c.name,desc:c.desc||'',color:c.color||'',source:c.source||'upload'});
     c.sprites.forEach((p,i)=>f.sprites.set(p.id,{characterId:c.id,name:p.name,desc:p.desc||'',imageKey:p.imageKey||'',position:i}));}
@@ -1140,9 +1159,9 @@ function sendDrag(orig,done){if(!connected)return;const now=performance.now();if
 let lastCharSend=0,lastCharMsg='';
 function sendCharDrag(d,done,cancel){if(!connected)return;const now=performance.now();if(!done&&now-lastCharSend<50)return;
   const st=d.over&&d.ok&&stageEl(d.over);let pos=null;
-  if(st){const r=frameRect(st),q=d.snap&&!d.alt?d.snap:rawPos(d,r,r.height*SPRITE_H);pos={x:+Math.max(2,Math.min(98,q.x)).toFixed(1),y:+Math.max(0,Math.min(POS_Y_MAX,q.y)).toFixed(1)};}
+  if(st){const r=frameRect(st),q=d.snap&&!d.alt?d.snap:rawPos(d,r,r.height*SPRITE_H*dk(d));pos={x:+Math.max(2,Math.min(98,q.x)).toFixed(1),y:+Math.max(0,Math.min(POS_Y_MAX,q.y)).toFixed(1),k:dk(d)};}
   const w=toWorld(d.px+d.ox*d.h,d.py+d.oy*d.h); // do ponteiro: d.ax/ay só andam com o rAF
-  const p={c:d.src.c,s:d.src.s,sid:d.src.sid||'',over:pos?d.over:'',x:pos?pos.x:0,y:pos?pos.y:0,wx:Math.round(w.x),wy:Math.round(w.y),wh:Math.round(d.h/view.z),drop:done&&!cancel&&!!pos};
+  const p={c:d.src.c,s:d.src.s,sid:d.src.sid||'',over:pos?d.over:'',x:pos?pos.x:0,y:pos?pos.y:0,k:pos?pos.k:1,wx:Math.round(w.x),wy:Math.round(w.y),wh:Math.round(d.h/view.z),drop:done&&!cancel&&!!pos};
   const msg=JSON.stringify([['@char',JSON.stringify(p),0]]);
   // parado: só um sinal de vida por segundo (o outro lado solta o fantasma após 2,5 s sem notícia)
   if(!done&&msg===lastCharMsg&&now-lastCharSend<1000)return;lastCharSend=now;lastCharMsg=msg;
@@ -1154,7 +1173,7 @@ function onRemoteChar(row,raw,prof,now){let p;try{p=JSON.parse(raw);}catch(_){re
   if(g.img.getAttribute('src')!==sp.img)g.img.src=sp.img;g.el.querySelector('span').textContent=prof.name;
   const wasDone=g.done;g.p=p;g.seen=now;g.done=row.done;if(row.done&&!wasDone){g.doneAt=now;if(p.sid)renderNodes();}}
 // Alvo em pixels de tela, recalculado a cada quadro (o palco pode mudar com zoom, pan ou re-render).
-function remoteCharTarget(p){const st=p.over&&stageEl(p.over);if(st){const r=frameRect(st);return{x:r.left+p.x/100*r.width,y:r.bottom+p.y/100*r.height,h:r.height*SPRITE_H};}
+function remoteCharTarget(p){const st=p.over&&stageEl(p.over);if(st){const r=frameRect(st);return{x:r.left+p.x/100*r.width,y:r.bottom+p.y/100*r.height,h:r.height*SPRITE_H*(p.k||1)};}
   const cr=canvas.getBoundingClientRect();return{x:cr.left+view.x+p.wx*view.z,y:cr.top+view.y+p.wy*view.z,h:p.wh*view.z};}
 function stepRemoteChars(now,k){for(const[key,g]of remoteChars){
     if(now-g.seen>2500||g.done&&now-g.doneAt>(g.p.drop?320:260)){g.el.remove();remoteChars.delete(key);if(!g.done&&g.p.sid)renderNodes();continue;}

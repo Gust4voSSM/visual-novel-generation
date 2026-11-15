@@ -200,6 +200,11 @@ select.inp{padding:0 6px}
 .pchar{position:absolute;bottom:0;height:96%;transform:translateX(-50%);object-fit:contain;object-position:bottom;pointer-events:auto;cursor:grab;touch-action:none;-webkit-user-drag:none;user-select:none;transition:filter .25s}
 .pchar.dim{filter:brightness(.58) saturate(.8)}
 .pchar.sel{filter:drop-shadow(0 0 1px #fff) drop-shadow(0 0 5px var(--amber))}
+/* alça de tamanho do personagem selecionado */
+.khandle{position:absolute;width:14px;height:14px;margin:0 0 -7px -7px;border-radius:50%;background:var(--amber);border:2px solid #141414;box-shadow:0 0 0 1px var(--amber);cursor:ns-resize;touch-action:none;z-index:3;pointer-events:auto}
+.khandle::before{content:'';position:absolute;inset:-6px}
+.khandle:hover::after,body.kscaling .khandle::after{content:attr(data-pct);position:absolute;left:50%;bottom:100%;transform:translate(-50%,-4px);padding:0 5px;border-radius:4px;background:#141414;color:var(--amber);font:600 10px var(--mono);white-space:nowrap}
+body.kscaling,body.kscaling *{cursor:ns-resize!important}
 .pchar.dim.sel{filter:brightness(.8) drop-shadow(0 0 1px #fff) drop-shadow(0 0 5px var(--amber))}
 .pchar.hold{visibility:hidden}
 /* onion skin: o personagem arrastado nas cenas vizinhas (âmbar = anterior, azul = seguinte) */
