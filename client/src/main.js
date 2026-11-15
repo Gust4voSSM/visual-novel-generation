@@ -15,6 +15,14 @@ const imgUrl=k=>!k?'':/^(data:|https?:)/.test(k)?k:IMG_BASE+k;
 function makeChar(def,src){
   return{id:uid('c'),name:def.name,desc:def.desc,color:def.color||'',source:src||'example',status:'',error:'',sheetId:'',sprites:def.emotions.map(([n,d],i)=>{const imageKey=spriteKey(def.slug,i);return{id:uid('sp'),name:n,desc:d,imageKey,img:imgUrl(imageKey),status:'',error:''};})};}
 function makeBg(def,src){const imageKey=bgKey(def.slug);return{id:uid('b'),name:def.name,desc:def.desc,source:src||'example',imageKey,img:imgUrl(imageKey),status:'',error:''};}
+// Posição no palco, em % do quadro 16:9: x é o centro do sprite, y desce a base (corta mais do corpo).
+// Personagens sem posição (IA, dados antigos) caem nos slots fixos.
+const SPRITE_H=.96,POS_Y_MAX=45;
+function posOf(s,i){const cc=s.chars[i];if(cc.x!=null)return{x:cc.x,y:cc.y||0};return{x:(SLOTS[s.chars.length]||[])[i]??50,y:0};}
+function materialize(s){const ps=s.chars.map((_,i)=>posOf(s,i));s.chars.forEach((cc,i)=>{cc.x=ps[i].x;cc.y=ps[i].y;});}
+function byX(s){return s.chars.map((cc,i)=>({cc,x:posOf(s,i).x})).sort((a,b)=>a.x-b.x).map(o=>o.cc);}
+// Quem fala sai da cena: passa a fala para quem está na frente, ou vira narração se o palco esvaziou.
+function fixSpeaker(s){if(s.kind!=='dialogue'||s.chars.some(x=>x.c===s.speaker))return;if(s.chars.length){s.speaker=s.chars[s.chars.length-1].c;return;}s.kind='narration';s.speaker=null;toast('A cena ficou sem personagens; o texto virou narração.');}
 
 const[lia,davi,cida]=EXAMPLE.characters.map(d=>makeChar(d));
 const[bPraia,bFarol,bCafe]=EXAMPLE.backgrounds.map(d=>makeBg(d));
@@ -119,6 +127,8 @@ const freshRows=new Map;      // rowId -> t0
 const reveal=new Map;         // sceneId -> t0
 const selected=new Set;
 let expanded=null,animUntil=0;
+const castSel=new Map;          // sceneId -> personagem escolhido na barra de sprites
+let cdrag=null,landing=null;const remoteChars=new Map; // conexão -> personagem que outra pessoa arrasta    // personagem sendo arrastado / pousando no palco (o original fica oculto)
 const remoteDrag=new Map;       // sceneId -> {x,y,tx,ty,color,name,conn,seen,done}: nós que outra pessoa arrasta
 const pushOff=new Map;const dispY=s=>{const r=remoteDrag.get(s.id);return r?r.y:s.y+(pushOff.get(s.id)||0);};
 const dispX=s=>{const r=remoteDrag.get(s.id);return r?r.x:s.x;};
@@ -145,14 +155,18 @@ function ago(t0){return Math.round(performance.now()-t0);}
 /* ---------- node rendering ---------- */
 const REMOTE_GEN={full:'',i:0};
 const genOf=s=>gens.get(s.id)||(s.aiStatus==='generating'?REMOTE_GEN:null);
-function stageMini(s){const bg=bgById(s.bg);const n=s.chars.length,pos=SLOTS[n]||[];const w=n>3?Math.max(18,100/n*1.25):30;const g=genOf(s);
+function hiddenChar(sid,c){for(const g of remoteChars.values())if(!g.done&&g.p.sid===sid&&g.p.c===c)return true;return!!(cdrag&&cdrag.moved&&cdrag.src.sid===sid&&cdrag.src.c===c||landing&&landing.sid===sid&&landing.c===c);}
+function castSelOf(s){const v=castSel.get(s.id);if(v&&s.chars.some(x=>x.c===v))return v;if(s.kind==='dialogue'&&s.speaker)return s.speaker;return s.chars.length?s.chars[s.chars.length-1].c:null;}
+function stageMini(s){const bg=bgById(s.bg);const g=genOf(s);
   if(g)return`<div class="stage-mini"><div class="gen-veil"><span class="skel" style="width:72%"></span><span class="skel" style="width:54%"></span><span class="skel" style="width:63%"></span></div></div>`;
   const rv=reveal.has(s.id)?ago(reveal.get(s.id)):null;const rvOn=rv!==null&&rv<1600;
   let h=bg&&bg.img?`<img class="bgimg" src="${bg.img}" alt="" ${rvOn?`style="animation-delay:-${rv}ms"`:''}>`:`<div class="nobg">sem background</div>`;
-  s.chars.forEach((cc,i)=>{const c=charById(cc.c),sp=spriteOf(c,cc.s);if(!sp||!sp.img)return;h+=`<img class="pchar" style="left:${pos[i]}%;max-width:${w}%;${rvOn?`animation-delay:${180+i*110-rv}ms`:''}" src="${sp.img}" alt="">`;});
-  return`<div class="stage-mini${rvOn?' reveal':''}">${h}</div>`;}
+  const dlg=s.kind==='dialogue'&&s.speaker,sel=expanded===s.id?castSelOf(s):null;let ch='';
+  s.chars.forEach((cc,i)=>{const c=charById(cc.c),sp=spriteOf(c,cc.s);if(!sp||!sp.img)return;const p=posOf(s,i);const cls=['pchar'];if(hiddenChar(s.id,cc.c))cls.push('hold');if(dlg&&cc.c!==s.speaker)cls.push('dim');if(sel===cc.c)cls.push('sel');
+    ch+=`<img class="${cls.join(' ')}" data-c="${cc.c}" draggable="false" style="left:${p.x}%;bottom:${-p.y}%;${rvOn?`animation-delay:${180+i*110-rv}ms`:''}" src="${sp.img}" alt="${esc(c.name)}" title="${esc(c.name)} · arraste para mover">`;});
+  return`<div class="stage-mini${rvOn?' reveal':''}" data-stage="${s.id}">${h}<div class="stage-frame">${ch}</div></div>`;}
 function rowFresh(id){const t=freshRows.get(id);if(t==null)return'';const a=ago(t);if(a>700){freshRows.delete(id);return'';}return` fresh" style="animation-delay:-${a}ms`;}
-function nodeHTML(s,ws,reach,lnk,incoming){const g=genOf(s);const isStart=state.start===s.id;const exp=expanded===s.id&&!g;const avail=state.characters.filter(c=>!s.chars.some(x=>x.c===c.id));
+function nodeHTML(s,ws,reach,lnk,incoming){const g=genOf(s);const isStart=state.start===s.id;const exp=expanded===s.id&&!g;
   const cls=['node'];if(exp)cls.push('exp');if(s.ai)cls.push('ai');if(selected.has(s.id))cls.push('sel');if(!reach.has(s.id)&&!g)cls.push('unreach');
   const dv=draft&&draft.view;if(dv){if(dv.del.has(s.id))cls.push('ddel');if(dv.edit.has(s.id))cls.push('dunder');}
   const rd=remoteDrag.get(s.id);if(rd)cls.push('rdrag');
@@ -169,15 +183,15 @@ function nodeHTML(s,ws,reach,lnk,incoming){const g=genOf(s);const isStart=state.
     const opts=s.choices.map((ch,i)=>{const pc=portCls(s.id,ch.id,lnk);return`<div class="orow c${ch.gen?' optgen':''}${ch.target?'':' draft'}${rowFresh('opt:'+ch.id)}"><span class="onum">${i+1}</span><span class="olabel" data-act="clabel" data-i="${i}">${ch.label?esc(ch.label):'<i class="none">sem texto</i>'}</span>${ch.target?'':'<span class="tag warn">sem destino</span>'}<button class="port out ${pc}${ch.target?'':' draft'}" data-out="${s.id}" data-ch="${ch.id}" aria-label="Saída da ação ${esc(ch.label)}${ch.target?'':', sem destino'}"></button></div>`;}).join('');
     const single=!nOpts?`<div class="orow c"><span class="nextlabel">${s.next?'continuar → '+esc(scene(s.next)?.title||''):'continuar'}</span><button class="port out ${portCls(s.id,'',lnk)}" data-out="${s.id}" data-ch="" aria-label="Saída única de ${esc(s.title)}"></button></div>`:'';
     return`<div class="${cls.join(' ')}" data-id="${s.id}" style="${style}">${head}<div class="mid"><div class="sec">${stageMini(s)}${lkText?lockBadge(lkText):''}<div class="sum">${sum}</div></div></div>${opts}${single}</div>`;}
-  const full=s.chars.length>=MAXCH;
-  const cast=s.chars.map((cc,i)=>{const c=charById(cc.c);if(!c)return'';const sp=spriteOf(c,cc.s);return`<div class="cast-row${rowFresh('cast:'+s.id+':'+c.id)}"><img src="${sp?sp.img:''}" alt=""><span class="cast-name" style="color:${c.color||'inherit'}" title="${esc(c.name)}">${esc(c.name)}<span class="slot">${i+1}</span></span><select class="msel" data-act="sprite" data-i="${i}" aria-label="Sprite de ${esc(c.name)}">${c.sprites.filter(p=>p.img||p.id===cc.s).map(p=>`<option value="${p.id}"${p.id===cc.s?' selected':''}>${esc(p.name)}</option>`).join('')}</select><button class="iconbtn sm" data-act="rmchar" data-i="${i}" aria-label="Tirar ${esc(c.name)} da cena"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M7 7l10 10M17 7L7 17"/></svg></button></div>`;}).join('');
-  const add=`<select class="msel" data-act="addchar" ${full||!avail.length?'disabled':''} aria-label="Adicionar personagem"><option value="">${full?'limite de 6 personagens':avail.length?`+ personagem  (${s.chars.length}/6)`:'todo o elenco já está na cena'}</option>${avail.map(c=>{const ok=c.sprites.some(p=>p.img);return`<option value="${c.id}"${ok?'':' disabled'}>${esc(c.name)}${ok?'':busy(c)||c.sprites.some(busy)?' · gerando':' · sem sprites'}</option>`;}).join('')}</select>`;
-  const speaker=s.kind==='dialogue'?`<div class="speaker"><span class="lbl">quem fala</span><select class="msel" data-act="speaker" aria-label="Quem fala">${s.chars.map(cc=>{const c=charById(cc.c);if(!c)return'';return`<option value="${c.id}"${c.id===s.speaker?' selected':''}>${esc(c.name)}</option>`}).join('')}</select></div>`:'';
+  // elenco = quem está no palco; a barra mostra os sprites do personagem escolhido (clique nele no palco)
+  const selC=castSelOf(s),selCC=s.chars.find(x=>x.c===selC),selCh=selCC&&charById(selC);
+  const cast=selCh?`<div class="castbar${rowFresh('cast:'+s.id+':'+selC)}"><div class="cb-head"><span class="cast-name" style="color:${selCh.color||'inherit'}">${esc(selCh.name)}</span><span class="hintsm">${s.chars.length}/${MAXCH} · solte fora da cena para tirar</span></div><div class="cb-sprites" role="group" aria-label="Sprite de ${esc(selCh.name)}">${selCh.sprites.filter(p=>p.img||p.id===selCC.s).map(p=>`<button class="cb-sp" data-act="sprite" data-c="${selC}" data-v="${p.id}" aria-pressed="${p.id===selCC.s}" title="${esc(p.name)}"><img src="${p.img}" alt="" draggable="false"><span>${esc(p.name)}</span></button>`).join('')}</div></div>`:`<div class="castempty">Arraste personagens do painel até a cena</div>`;
+  const speaker=s.kind==='dialogue'?`<div class="speaker"><span class="lbl">quem fala</span><div class="spk" role="group" aria-label="Quem fala">${byX(s).map(cc=>{const c=charById(cc.c);if(!c)return'';return`<button class="spk-chip" data-act="speaker" data-v="${c.id}" aria-pressed="${c.id===s.speaker}" style="--cc:${c.color||'var(--text)'}"><img src="${spriteOf(c,cc.s)?.img||''}" alt="" draggable="false">${esc(c.name)}</button>`;}).join('')}</div></div>`:'';
   const opts=s.choices.map((ch,i)=>{const pc=portCls(s.id,ch.id,lnk);const og=ch.gen?' optgen':'';const lk=lockOf('choice:'+ch.id+':label');return`<div class="orow${og}${ch.target?'':' draft'}${rowFresh('opt:'+ch.id)}"><span class="onum">${i+1}</span><input class="oin${lk?' locked':''}" data-act="clabel" data-i="${i}" value="${esc(ch.label)}" placeholder="Texto da ação" aria-label="Ação do jogador"${lk?` readonly title="${esc(lk.name)} está escrevendo…" style="--lc:${lk.color}"`:''}><button class="iconbtn sm" data-act="rmchoice" data-i="${i}" aria-label="Remover ação"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M7 7l10 10M17 7L7 17"/></svg></button><button class="port out ${pc}${ch.target?'':' draft'}" data-out="${s.id}" data-ch="${ch.id}" aria-label="Saída da ação ${esc(ch.label)}${ch.target?'':', sem destino'}"></button></div>`;}).join('');
   const single=!nOpts?`<div class="orow"><span class="nextlabel">${s.next?'continuar → '+esc(scene(s.next)?.title||''):'continuar'}</span><button class="port out ${portCls(s.id,'',lnk)}" data-out="${s.id}" data-ch="" aria-label="Saída única de ${esc(s.title)}"></button></div>`:'';
   return`<div class="${cls.join(' ')}" data-id="${s.id}" style="${style}">${head}
   <div class="mid"><div class="sec">${stageMini(s)}<select class="msel" data-act="bg" aria-label="Background"><option value="">sem background</option>${state.backgrounds.filter(b=>b.img||b.id===s.bg).map(b=>`<option value="${b.id}"${b.id===s.bg?' selected':''}>${esc(b.name)}</option>`).join('')}</select></div>
-  <div class="sec grow-in">${cast}${add}</div>
+  <div class="sec grow-in">${cast}</div>
   <div class="sec grow-in"><div class="seg" role="group" aria-label="Tipo de texto"><button data-act="kind" data-v="narration" aria-pressed="${s.kind==='narration'}">Narração</button><button data-act="kind" data-v="dialogue" aria-pressed="${s.kind==='dialogue'}">Fala</button></div>${speaker}${lkText?lockBadge(lkText):''}<textarea class="ntext${s.kind==='narration'?' narr':''}${lkText?' locked':''}" data-act="text" placeholder="${s.kind==='narration'?'Descreva o ambiente…':'O que o personagem diz…'}" aria-label="Texto da cena"${lkText?` readonly style="--lc:${lkText.color}"`:''}>${esc(s.text)}</textarea></div></div>
   ${opts}${single}
   <div class="nfoot grow-in"><button class="addbtn" data-act="addchoice" data-hover="add">+ ação</button><button class="addbtn ai" data-act="complete" title="Completar o texto com IA">IA: completar</button><span class="hintsm">${nOpts?nOpts+(nOpts>1?' ações':' ação'):'saída única'}</span></div></div>`;}
@@ -272,7 +286,8 @@ function createScene(src,ch,at,ai,opts={}){const sp=outPos(src.id,ch)||{x:src.x+
   fresh.set(ns.id,{t0:performance.now(),cls:ai?'pop-ai':'pop'});
   if(click)tweens.set(key,{fx:sp.x,fy:sp.y,t0:performance.now(),ai:false,noland:true,to:ns.id});
   burst(click?ns.x:p.x,click?ns.y+20:p.y,ai?'ai':'plain');
-  if(!ai)expanded=ns.id;
+  // sem IA, a cena nova continua a anterior: mesmo background e o elenco nas mesmas posições
+  if(!ai){expanded=ns.id;ns.bg=src.bg||null;ns.chars=src.chars.map((cc,i)=>{const p=posOf(src,i);return{c:cc.c,s:cc.s,x:p.x,y:p.y};});}
   if(ai){ns.ai=true;ns.title='Gerando…';gens.set(ns.id,{full:'',i:0,comp:null,key,labelCh:opts.labelCh||null});lit.add(key);shake();}
   refresh();ensureVisible(ns.id);if(ai)runSuggest(ns.id,src.id,ch);return ns;}
 // A cena já existe para todos com ai = 'generating'; o worker só devolve o conteúdo.
@@ -337,12 +352,11 @@ nodesEl.addEventListener('input',e=>{const n=e.target.closest('.node');if(!n)ret
 nodesEl.addEventListener('change',e=>{const n=e.target.closest('.node');if(!n)return;const s=scene(n.dataset.id);const a=e.target.dataset.act;const v=e.target.value;
   if(['text','title','clabel'].includes(a)){endTyping();renderStats(warnings().list);return;}
   if(a==='bg'){pushUndo();s.bg=v||null;if(v){reveal.set(s.id,performance.now());setTimeout(()=>reveal.delete(s.id),1700);}refresh();}
-  else if(a==='sprite'){pushUndo();s.chars[+e.target.dataset.i].s=v;refresh();}
-  else if(a==='speaker'){pushUndo();s.speaker=v;refresh();}
-  else if(a==='addchar'&&v){if(s.chars.length>=MAXCH){toast('Uma cena tem no máximo 6 personagens.','err');return;}const c=charById(v);const sp0=c&&c.sprites.find(p=>p.img);if(!sp0)return;pushUndo();s.chars.push({c:c.id,s:sp0.id});freshRows.set('cast:'+s.id+':'+c.id,performance.now());reveal.set(s.id,performance.now());setTimeout(()=>reveal.delete(s.id),1700);refresh();}});
+});
 nodesEl.addEventListener('click',e=>{const b=e.target.closest('[data-act]');const n=e.target.closest('.node');if(!b||!n)return;const s=scene(n.dataset.id);const a=b.dataset.act;
-  if(a==='rmchar'){const i=+b.dataset.i;if(s.kind==='dialogue'&&s.speaker===s.chars[i].c){toast(`${charById(s.chars[i].c).name} é quem fala nesta cena. Troque quem fala ou mude para Narração antes de tirar.`,'err');nodeShake(s.id);return;}pushUndo();s.chars.splice(i,1);refresh();}
-  else if(a==='kind'){const v=b.dataset.v;if(v===s.kind)return;if(v==='dialogue'&&!s.chars.length){toast('Para criar uma fala, adicione antes um personagem à cena.','err');nodeShake(s.id);return;}pushUndo();s.kind=v;s.speaker=v==='dialogue'?s.chars[0].c:null;refresh();}
+  if(a==='sprite'){const cc=s.chars.find(x=>x.c===b.dataset.c);if(!cc||cc.s===b.dataset.v)return;pushUndo();cc.s=b.dataset.v;refresh();}
+  else if(a==='speaker'){castSel.set(s.id,b.dataset.v);if(s.speaker===b.dataset.v){renderNodes();return;}pushUndo();s.speaker=b.dataset.v;refresh();}
+  else if(a==='kind'){const v=b.dataset.v;if(v===s.kind)return;if(v==='dialogue'&&!s.chars.length){toast('Para criar uma fala, arraste antes um personagem para a cena.','err');nodeShake(s.id);return;}pushUndo();s.kind=v;s.speaker=v==='dialogue'?castSelOf(s):null;refresh();}
   else if(a==='addchoice'){if(heldAdd){heldAdd=false;return;}addChoice(s,e.shiftKey);}
   else if(a==='rmchoice'){const i=+b.dataset.i;const ch=s.choices[i];const g=geom.get(edgeKey(s.id,ch.id));if(g)ghosts.push({kind:'end',a:g.a,b:g.b,col:'#f2a541',t0:performance.now()});pushUndo();s.choices.splice(i,1);refresh();}
   else if(a==='menu'){e.stopPropagation();showMenu(n,s);}
@@ -385,6 +399,10 @@ canvas.addEventListener('pointerdown',e=>{if(e.target.closest('.hud,.hudpop,.zoo
     return;}
   if(e.button===2||e.button===1||(e.button===0&&spaceDown)||(touch&&!e.target.closest('.node'))){e.preventDefault();if(touch)canvas.focus({preventScroll:true});drag={type:'pan',pid:e.pointerId,touch,moved:false,cx:e.clientX,cy:e.clientY,vx:view.x,vy:view.y};canvas.classList.add('panning');canvas.setPointerCapture(e.pointerId);return;}
   if(e.button!==0)return;
+  const pc=!e.altKey&&!cdrag&&e.target.closest('.stage-mini[data-stage] .pchar');
+  if(pc){const sid=pc.closest('[data-stage]').dataset.stage,s=scene(sid),cc=s&&s.chars.find(x=>x.c===pc.dataset.c);
+    if(cc){if(remoteDrag.has(sid)){toast(`${remoteDrag.get(sid).name} está movendo esta cena.`,'err');return;}if(document.activeElement&&nodesEl.contains(document.activeElement))document.activeElement.blur();
+      const r=pc.getBoundingClientRect();startCharDrag(e,{sid,c:cc.c,s:cc.s},pc.src,{ax:r.left+r.width/2,ay:r.bottom,h:r.height,clip:1,free:r.height});return;}}
   if(e.altKey){e.preventDefault();const p=toWorld(e.clientX,e.clientY);drag={type:'cut',x1:p.x,y1:p.y,x2:p.x,y2:p.y};canvas.setPointerCapture(e.pointerId);return;}
   const nodeHit=e.target.closest('.node');const titleHit=e.target.closest('.ntitle');
   if(nodeHit&&!(titleHit&&document.activeElement===titleHit)&&(titleHit||!e.target.closest('textarea,select,button,input,label,.menu,.port'))){e.preventDefault();if(document.activeElement&&nodesEl.contains(document.activeElement))document.activeElement.blur();const id=nodeHit.dataset.id;if(remoteDrag.has(id)){toast(`${remoteDrag.get(id).name} está movendo esta cena.`,'err');return;}if(touch&&selectMode);// no modo de seleção o toque só marca/desmarca ao soltar
@@ -568,6 +586,107 @@ railBody.addEventListener('change',e=>{const card=e.target.closest('.card');if(!
   if(t.matches('[data-upsprite]')){const cid=card.dataset.c;uploadImage(t.files[0]).then(key=>{const c=charById(cid);if(!c)return;pushUndo();c.sprites.push({id:uid('sp'),name:'Nova emoção',desc:'',imageKey:key,img:imgUrl(key),status:'',error:''});renderRail();refresh();toast('Sprite enviado. Dê um nome e uma descrição a ele.');},uploadFailed);return;}
   if(t.matches('[data-upbg]')){const bid=card.dataset.b;uploadImage(t.files[0]).then(key=>{const b=bgById(bid);if(!b)return;pushUndo();b.imageKey=key;b.img=imgUrl(key);renderRail();refresh();},uploadFailed);return;}
   if(pendingSnap&&pendingSnap!==snapStr())pushUndo(pendingSnap);pendingSnap=null;renderRail();refresh();});
+
+/* ---------- personagens no palco: arrastar do painel, mover, tirar ---------- */
+// Enquanto arrasta, o sprite aparece inteiro; ao pousar, o recorte do palco fecha sobre ele (e abre ao pegar de volta).
+// O fantasma é ancorado na base (centro embaixo), como o sprite no palco, para o pouso não dar salto.
+let railSuppress=false;
+railBody.addEventListener('pointerdown',e=>{railSuppress=false;if(e.button!==0||cdrag)return;const card=e.target.closest('.card[data-c]');if(!card)return;
+  const spImg=e.target.closest('.sprite img'),row=e.target.closest('.card-row');if(!spImg&&!row)return;
+  if(e.pointerType==='touch'&&!e.target.closest('.avatar,.sprite img'))return; // no toque, o resto do cartão rola o painel
+  const c=charById(card.dataset.c);const sp=spImg?spriteOf(c,spImg.closest('[data-sp]').dataset.sp):readySprites(c)[0];if(!sp||!sp.img)return; // ainda gerando: nada para arrastar
+  const r=(spImg||row.querySelector('.avatar')).getBoundingClientRect();
+  startCharDrag(e,{c:c.id,s:sp.id},sp.img,{ax:e.clientX,ay:e.clientY+r.height*.5,h:r.height,clip:0,free:Math.max(110,Math.min(260,300*9/16*SPRITE_H*view.z))});});
+railBody.addEventListener('click',e=>{if(railSuppress){railSuppress=false;e.stopPropagation();e.preventDefault();}},true);
+const stageEl=sid=>nodesEl.querySelector(`.stage-mini[data-stage="${sid}"]`);
+const frameRect=st=>st.querySelector('.stage-frame').getBoundingClientRect();
+const easeOut=k=>1-Math.pow(1-k,3),easeInOut=k=>k<.5?4*k*k*k:1-Math.pow(-2*k+2,3)/2;
+function startCharDrag(e,src,img,from){e.preventDefault();
+  const g=document.createElement('img');g.className='cghost';g.src=img;g.alt='';g.draggable=false;g.style.visibility='hidden';document.body.appendChild(g);
+  // ox/oy: âncora relativa ao ponteiro, em alturas do sprite (vale enquanto o tamanho muda)
+  cdrag={pid:e.pointerId,touch:e.pointerType==='touch',src,g,sx:e.clientX,sy:e.clientY,px:e.clientX,py:e.clientY,ox:(from.ax-e.clientX)/from.h,oy:(from.ay-e.clientY)/from.h,
+    ax:from.ax,ay:from.ay,h:from.h,clip:from.clip,free:from.free,moved:false,end:false,over:null,ok:false,why:''};
+  addEventListener('pointermove',onCharMove);addEventListener('pointerup',onCharUp);addEventListener('pointercancel',onCharCancel);}
+function offChar(){removeEventListener('pointermove',onCharMove);removeEventListener('pointerup',onCharUp);removeEventListener('pointercancel',onCharCancel);document.body.classList.remove('chardrag');
+  nodesEl.querySelectorAll('.drop-ok,.drop-bad').forEach(x=>x.classList.remove('drop-ok','drop-bad'));nodesEl.querySelectorAll('.stage-mini[data-onion]').forEach(clearOnion);nodesEl.querySelectorAll('.pchar.clash').forEach(x=>x.classList.remove('clash'));}
+function paintGhost(d,clipTo,p){const g=d.g,ar=g.naturalWidth?g.naturalWidth/g.naturalHeight:2/3,w=d.h*ar,L=d.ax-w/2,T=d.ay-d.h;
+  g.style.height=d.h+'px';g.style.transform=`translate(${(L).toFixed(1)}px,${T.toFixed(1)}px)`;
+  if(clipTo&&p>0){const it=Math.max(0,clipTo.top-T)*p,ir=Math.max(0,L+w-clipTo.right)*p,ib=Math.max(0,T+d.h-clipTo.bottom)*p,il=Math.max(0,clipTo.left-L)*p;g.style.clipPath=`inset(${it}px ${ir}px ${ib}px ${il}px round ${(7*view.z*p).toFixed(1)}px)`;}
+  else g.style.clipPath='';}
+function hoverStage(){const d=cdrag;const hit=document.elementFromPoint(d.px,d.py);const st=hit&&hit.closest('.stage-mini[data-stage]');const sid=st?st.dataset.stage:null;
+  nodesEl.querySelectorAll('.drop-ok,.drop-bad').forEach(x=>{if(x!==st)x.classList.remove('drop-ok','drop-bad');});
+  nodesEl.querySelectorAll('.pchar.clash').forEach(x=>{if(!st||!st.contains(x))x.classList.remove('clash');});
+  nodesEl.querySelectorAll('.stage-mini[data-onion]').forEach(x=>{if(x!==st||!d.ok&&x.dataset.onion)clearOnion(x);});
+  d.over=sid;d.ok=false;d.why='';if(!st)return;
+  const s=scene(sid),same=sid===d.src.sid;
+  if(!same&&s.chars.some(x=>x.c===d.src.c)){d.why='dup';st.querySelector(`.pchar[data-c="${d.src.c}"]`)?.classList.add('clash');}
+  else if(!same&&s.chars.length>=MAXCH)d.why='full';else d.ok=true;
+  st.classList.toggle('drop-ok',d.ok);st.classList.toggle('drop-bad',!d.ok);
+  if(d.ok&&st.dataset.onion!==d.src.c)paintOnion(st,sid,d.src.c);else if(!d.ok)clearOnion(st);}
+/* Onion skin: onde o personagem arrastado está na cena anterior e na seguinte, para manter a posição entre cenas. */
+function neighbors(sid){const s=scene(sid);const prev=state.scenes.filter(o=>o.id!==sid&&(o.next===sid||o.choices.some(c=>c.target===sid)));
+  const next=s?[...new Set([s.next,...s.choices.map(c=>c.target)].filter(Boolean))].map(scene).filter(Boolean):[];return{prev,next};}
+function onionOf(sid,c){const out=[];const{prev,next}=neighbors(sid);
+  for(const[dir,list]of[['prev',prev],['next',next]])for(const o of list){const i=o.chars.findIndex(x=>x.c===c);if(i<0)continue;const sp=spriteOf(charById(c),o.chars[i].s);if(!sp)continue;
+    const p=posOf(o,i);if(out.some(q=>Math.abs(q.x-p.x)<.5&&Math.abs(q.y-p.y)<.5)){const q=out.find(q=>Math.abs(q.x-p.x)<.5&&Math.abs(q.y-p.y)<.5);if(q.dir!==dir)q.dir='both';q.titles.push(o.title);continue;}
+    out.push({x:p.x,y:p.y,img:sp.img,dir,titles:[o.title]});}
+  return out;}
+function paintOnion(st,sid,c){clearOnion(st);const fr=st.querySelector('.stage-frame');if(!fr)return;st.dataset.onion=c;
+  for(const o of onionOf(sid,c)){const el=document.createElement('img');el.className='onion '+o.dir;el.src=o.img;el.alt='';el.draggable=false;el.dataset.x=o.x;el.dataset.y=o.y;
+    el.style.left=o.x+'%';el.style.bottom=-o.y+'%';el.title=(o.dir==='next'?'na cena seguinte: ':o.dir==='prev'?'na cena anterior: ':'nas cenas vizinhas: ')+o.titles.join(', ');fr.prepend(el);}}
+function clearOnion(st){delete st.dataset.onion;st.querySelectorAll('.onion').forEach(x=>x.remove());}
+// Atrai para a posição de uma cena vizinha quando perto (Alt solta o ímã).
+const SNAP_X=4,SNAP_Y=6;
+function rawPos(d,r,h){const ax=d.px+d.ox*h,ay=d.py+d.oy*h;return{x:(ax-r.left)/r.width*100,y:(ay-r.bottom)/r.height*100};}
+function snapOnion(d,st,p){let best=null,bd=1e9;st.querySelectorAll('.onion').forEach(o=>{o.classList.remove('hit');if(d.alt)return;const dx=Math.abs(+o.dataset.x-p.x),dy=Math.abs(+o.dataset.y-p.y);
+    if(dx<=SNAP_X&&dy<=SNAP_Y&&dx+dy<bd){bd=dx+dy;best=o;}});
+  if(!best)return null;best.classList.add('hit');return{x:+best.dataset.x,y:+best.dataset.y};}
+function charLoop(){const d=cdrag;if(!d||d.end)return;hoverStage();
+  const th=d.over&&d.ok?frameRect(stageEl(d.over)).height*SPRITE_H:d.free;d.h+=(th-d.h)*.28;
+  d.ax=d.px+d.ox*d.h;d.ay=d.py+d.oy*d.h;d.snap=null;
+  const ost=d.over&&d.ok&&stageEl(d.over);if(ost){const r=frameRect(ost),sn=snapOnion(d,ost,rawPos(d,r,r.height*SPRITE_H));
+    if(sn){d.snap=sn;const tx=r.left+sn.x/100*r.width,ty=r.bottom+sn.y/100*r.height;d.sax=(d.sax??d.ax)+(tx-(d.sax??d.ax))*.45;d.say=(d.say??d.ay)+(ty-(d.say??d.ay))*.45;d.ax=d.sax;d.ay=d.say;}else d.sax=d.say=null;}
+  if(d.clip>0)d.clip=Math.max(0,d.clip-.09);const src=d.clip>0&&d.src.sid&&stageEl(d.src.sid);
+  paintGhost(d,src&&src.getBoundingClientRect(),easeInOut(d.clip));sendCharDrag(d,false);requestAnimationFrame(charLoop);}
+function onCharMove(e){const d=cdrag;if(!d||e.pointerId!==d.pid)return;d.px=e.clientX;d.py=e.clientY;d.alt=e.altKey;
+  if(!d.moved){if(Math.hypot(d.px-d.sx,d.py-d.sy)<(d.touch?8:4))return;d.moved=true;document.body.classList.add('chardrag');
+    if(d.src.sid)renderNodes();else if(mqNarrow.matches)setPanel('rail',false);
+    paintGhost(d,d.src.sid&&stageEl(d.src.sid)?.getBoundingClientRect(),1);d.g.style.visibility='';requestAnimationFrame(charLoop);}
+  hoverStage();sendCharDrag(d,false);}
+// Pousa o fantasma em pos (% do quadro) do palco sid, fechando o recorte; o sprite real só aparece no fim.
+function landGhost(d,sid,pos,done){const a0={ax:d.ax,ay:d.ay,h:d.h},t0=performance.now(),D=reduced?1:300;const me={sid,c:d.src.c};landing=me;let fin=false;
+  // sem rAF (aba em segundo plano) o pouso termina pelo relógio, para o sprite real não ficar oculto
+  const finish=()=>{if(fin)return;fin=true;if(landing===me)landing=null;done();requestAnimationFrame(()=>d.g.remove());setTimeout(()=>d.g.remove(),80);};
+  const step=t=>{if(fin)return;const st=stageEl(sid);if(!st){finish();return;}const r=frameRect(st),k=Math.min(1,(t-t0)/D),q=easeOut(k);
+    d.ax=a0.ax+(r.left+pos.x/100*r.width-a0.ax)*q;d.ay=a0.ay+(r.bottom+pos.y/100*r.height-a0.ay)*q;d.h=a0.h+(r.height*SPRITE_H-a0.h)*q;
+    paintGhost(d,st.getBoundingClientRect(),easeInOut(k));
+    if(k<1)requestAnimationFrame(step);else finish();};
+  requestAnimationFrame(step);setTimeout(finish,D+250);}
+function fadeGhost(d,poof){const g=d.g;if(poof){const r=g.getBoundingClientRect();screenBurst(r.left+r.width/2,r.top+r.height/2,false);}
+  g.style.transition='opacity .22s,height .22s';g.style.opacity='0';setTimeout(()=>g.remove(),240);}
+function flyBack(d){cdrag=null;const s=scene(d.src.sid),i=s?s.chars.findIndex(x=>x.c===d.src.c):-1;if(i<0){fadeGhost(d);renderNodes();return;}
+  landGhost(d,s.id,posOf(s,i),renderNodes);}
+function onCharUp(e){const d=cdrag;if(!d||e.pointerId!==d.pid)return;d.px=e.clientX;d.py=e.clientY;d.alt=e.altKey;if(d.moved)hoverStage();
+  // o ímã é decidido aqui também: sem rAF (aba em segundo plano) o loop não roda
+  const ust=d.moved&&d.over&&d.ok&&stageEl(d.over);if(ust){const r=frameRect(ust);d.snap=snapOnion(d,ust,rawPos(d,r,r.height*SPRITE_H));}if(d.moved)sendCharDrag(d,true);offChar();
+  if(!d.moved){d.g.remove();cdrag=null;if(d.src.sid){castSel.set(d.src.sid,d.src.c);expanded===d.src.sid?renderNodes():setExpanded(d.src.sid);}return;}
+  d.end=true;if(!d.src.sid){railSuppress=true;setTimeout(()=>railSuppress=false,0);}
+  if(d.over&&d.ok){dropChar(d);return;}
+  if(d.over){toast(d.why==='dup'?`${charById(d.src.c).name} já está nesta cena.`:'Uma cena tem no máximo 6 personagens.','err');nodeShake(d.over);}
+  if(!d.src.sid){cdrag=null;fadeGhost(d);return;}
+  if(d.over){flyBack(d);return;}
+  // de um palco para fora de qualquer palco: sai da cena
+  const s=scene(d.src.sid);cdrag=null;if(s&&s.chars.some(x=>x.c===d.src.c)){pushUndo();materialize(s);s.chars=s.chars.filter(x=>x.c!==d.src.c);fixSpeaker(s);refresh();}else renderNodes();fadeGhost(d,true);}
+function onCharCancel(e){const d=cdrag;if(!d||e.pointerId!==d.pid)return;if(d.moved)sendCharDrag(d,true,true);offChar();d.end=true;if(d.moved&&d.src.sid){flyBack(d);return;}cdrag=null;d.g.remove();renderNodes();}
+function dropChar(d){const s=scene(d.over);if(!s){cdrag=null;fadeGhost(d);renderNodes();return;}
+  const r=frameRect(stageEl(s.id)),th=r.height*SPRITE_H,ax=d.px+d.ox*th,ay=d.py+d.oy*th;
+  const pos=d.snap&&!d.alt?{...d.snap}:{x:+Math.max(2,Math.min(98,(ax-r.left)/r.width*100)).toFixed(1),y:+Math.max(0,Math.min(POS_Y_MAX,(ay-r.bottom)/r.height*100)).toFixed(1)};
+  pushUndo();materialize(s);let cc=s.chars.find(x=>x.c===d.src.c);
+  if(d.src.sid&&d.src.sid!==s.id){const o=scene(d.src.sid);if(o){const old=o.chars.find(x=>x.c===d.src.c);materialize(o);o.chars=o.chars.filter(x=>x!==old);fixSpeaker(o);}}
+  if(cc)s.chars=s.chars.filter(x=>x!==cc);else{cc={c:d.src.c,s:d.src.s};freshRows.set('cast:'+s.id+':'+cc.c,performance.now());}
+  cc.x=pos.x;cc.y=pos.y;s.chars.push(cc);// por último = na frente
+  castSel.set(s.id,cc.c);cdrag=null;
+  landGhost(d,s.id,pos,renderNodes);refresh();}
 function publish(kind,item){const copy=JSON.parse(JSON.stringify(item));copy.id=uid(kind==='chars'?'c':'b');copy.author='@você';copy.source='marketplace';if(kind==='chars')copy.sprites.forEach(s=>s.id=uid('sp'));market[kind==='chars'?'characters':'backgrounds'].unshift(copy);toast(`“${item.name}” publicado no marketplace`);}
 
 /* ---------- modals ---------- */
@@ -819,8 +938,8 @@ let play=null;
 function openPlay(from){const st=from||state.start;if(!scene(st)){toast('Defina uma cena inicial.','err');return;}const el=document.createElement('div');el.className='play';document.body.appendChild(el);play={el,cur:st,hist:[],from:st};drawPlay();}
 function closePlay(){if(play){clearInterval(play.iv);play.el.remove();play=null;}}
 function go(t){if(!t){toast('Esta ação não tem destino (rascunho). No player público ela fica oculta.','err');return;}play.hist.push(play.cur);play.cur=t;drawPlay();}
-function drawPlay(){clearInterval(play.iv);const s=scene(play.cur);const n=s.chars.length,pos=SLOTS[n]||[];const bg=bgById(s.bg);const w=n>3?Math.max(18,100/n*1.25):30;
-  const chars=s.chars.map((cc,i)=>{const c=charById(cc.c),sp=spriteOf(c,cc.s);return sp?`<img class="schar" style="left:${pos[i]}%;max-width:${w}%;animation-delay:${i*90}ms" src="${sp.img}" alt="${esc(c.name)} (${esc(sp.name)})">`:''}).join('');
+function drawPlay(){clearInterval(play.iv);const s=scene(play.cur);const bg=bgById(s.bg);const dlg=s.kind==='dialogue'&&s.speaker;
+  const chars=s.chars.map((cc,i)=>{const c=charById(cc.c),sp=spriteOf(c,cc.s),p=posOf(s,i);return sp?`<img class="schar${dlg&&cc.c!==s.speaker?' dim':''}" style="left:${p.x}%;bottom:${-p.y}%;animation-delay:${i*90}ms" src="${sp.img}" alt="${esc(c.name)} (${esc(sp.name)})">`:''}).join('');
   const spk=s.kind==='dialogue'?charById(s.speaker):null;
   const box=s.text?(spk?`<div class="tbox dialogue"><div class="nametag" style="color:${spk.color||'var(--text)'}">${esc(spk.name)}</div><span data-t></span><span class="tcaret"></span></div>`:`<div class="tbox narration"><span><span data-t></span><span class="tcaret"></span></span></div>`):'';
   play.el.innerHTML=`<div class="phead"><span>${esc(state.title)} · ${esc(s.title)}</span><span class="grow"></span><button class="pbtn" data-back ${play.hist.length?'':'disabled'}>Voltar</button><button class="pbtn" data-restart>Reiniciar</button><button class="pbtn" data-exit>Voltar ao editor</button></div><div class="stage"><div class="pic">${bg?`<img class="bgimg" src="${bg.img}" alt="${esc(bg.name)}">`:''}${chars}</div>${box}<div data-after></div></div>`;
@@ -859,7 +978,7 @@ const emptyFlat=()=>({title:'',start:'',scenes:new Map,choices:new Map,chars:new
 const cloneMap=m=>new Map([...m].map(([k,v])=>[k,{...v}]));
 const cloneFlat=f=>({title:f.title,start:f.start,scenes:cloneMap(f.scenes),choices:cloneMap(f.choices),chars:cloneMap(f.chars),sprites:cloneMap(f.sprites),bgs:cloneMap(f.bgs)});
 function flatOf(st){const f=emptyFlat();f.title=st.title;f.start=st.start||'';
-  for(const s of st.scenes){f.scenes.set(s.id,{title:s.title,x:Math.round(s.x),y:Math.round(s.y),bg:s.bg||'',chars:JSON.stringify(s.chars.map(x=>({c:x.c,s:x.s}))),kind:s.kind,speaker:s.speaker||'',text:s.text,next:s.next||'',ai:gens.has(s.id)?'generating':(s.aiStatus==='failed'&&s.text?'':(s.aiStatus||''))});
+  for(const s of st.scenes){f.scenes.set(s.id,{title:s.title,x:Math.round(s.x),y:Math.round(s.y),bg:s.bg||'',chars:JSON.stringify(s.chars.map(x=>x.x!=null?{c:x.c,s:x.s,x:x.x,y:x.y||0}:{c:x.c,s:x.s})),kind:s.kind,speaker:s.speaker||'',text:s.text,next:s.next||'',ai:gens.has(s.id)?'generating':(s.aiStatus==='failed'&&s.text?'':(s.aiStatus||''))});
     s.choices.forEach((c,i)=>f.choices.set(c.id,{sceneId:s.id,label:c.label,target:c.target||'',position:i}));}
   for(const c of st.characters||[]){f.chars.set(c.id,{name:c.name,desc:c.desc||'',color:c.color||'',source:c.source||'upload'});
     c.sprites.forEach((p,i)=>f.sprites.set(p.id,{characterId:c.id,name:p.name,desc:p.desc||'',imageKey:p.imageKey||'',position:i}));}
@@ -1015,7 +1134,38 @@ function lockBadge(p){return`<div class="lockbadge" style="--lc:${p.color}" role
 let lastDrag=0;
 function sendDrag(orig,done){if(!connected)return;const now=performance.now();if(!done&&now-lastDrag<50)return;lastDrag=now;
   conn.reducers.sendDrag({moves:JSON.stringify(orig.map(o=>[o.s.id,o.s.x,o.s.y])),done}).catch(()=>{});}
+/* Personagem sendo arrastado: vai na mesma tabela drags, como ['@char', json, 0] (clientes antigos
+   não acham a cena '@char' e ignoram). Sobre um palco, a posição vai em % do quadro; fora, em
+   coordenadas do mundo, para cada um ver no lugar certo com o seu zoom e a sua câmera. */
+let lastCharSend=0,lastCharMsg='';
+function sendCharDrag(d,done,cancel){if(!connected)return;const now=performance.now();if(!done&&now-lastCharSend<50)return;
+  const st=d.over&&d.ok&&stageEl(d.over);let pos=null;
+  if(st){const r=frameRect(st),q=d.snap&&!d.alt?d.snap:rawPos(d,r,r.height*SPRITE_H);pos={x:+Math.max(2,Math.min(98,q.x)).toFixed(1),y:+Math.max(0,Math.min(POS_Y_MAX,q.y)).toFixed(1)};}
+  const w=toWorld(d.px+d.ox*d.h,d.py+d.oy*d.h); // do ponteiro: d.ax/ay só andam com o rAF
+  const p={c:d.src.c,s:d.src.s,sid:d.src.sid||'',over:pos?d.over:'',x:pos?pos.x:0,y:pos?pos.y:0,wx:Math.round(w.x),wy:Math.round(w.y),wh:Math.round(d.h/view.z),drop:done&&!cancel&&!!pos};
+  const msg=JSON.stringify([['@char',JSON.stringify(p),0]]);
+  // parado: só um sinal de vida por segundo (o outro lado solta o fantasma após 2,5 s sem notícia)
+  if(!done&&msg===lastCharMsg&&now-lastCharSend<1000)return;lastCharSend=now;lastCharMsg=msg;
+  conn.reducers.sendDrag({moves:msg,done}).catch(()=>{});}
+function onRemoteChar(row,raw,prof,now){let p;try{p=JSON.parse(raw);}catch(_){return;}const c=charById(p.c),sp=c&&spriteOf(c,p.s);if(!sp||!sp.img)return;
+  const key=row.connectionId.toHexString();let g=remoteChars.get(key);
+  if(!g){const el=document.createElement('div');el.className='rghost';el.style.setProperty('--rc',prof.color);el.innerHTML=`<img alt="" draggable="false"><span></span>`;document.body.appendChild(el);
+    g={el,img:el.querySelector('img'),x:null,y:null,h:null,p};remoteChars.set(key,g);if(p.sid)renderNodes();}
+  if(g.img.getAttribute('src')!==sp.img)g.img.src=sp.img;g.el.querySelector('span').textContent=prof.name;
+  const wasDone=g.done;g.p=p;g.seen=now;g.done=row.done;if(row.done&&!wasDone){g.doneAt=now;if(p.sid)renderNodes();}}
+// Alvo em pixels de tela, recalculado a cada quadro (o palco pode mudar com zoom, pan ou re-render).
+function remoteCharTarget(p){const st=p.over&&stageEl(p.over);if(st){const r=frameRect(st);return{x:r.left+p.x/100*r.width,y:r.bottom+p.y/100*r.height,h:r.height*SPRITE_H};}
+  const cr=canvas.getBoundingClientRect();return{x:cr.left+view.x+p.wx*view.z,y:cr.top+view.y+p.wy*view.z,h:p.wh*view.z};}
+function stepRemoteChars(now,k){for(const[key,g]of remoteChars){
+    if(now-g.seen>2500||g.done&&now-g.doneAt>(g.p.drop?320:260)){g.el.remove();remoteChars.delete(key);if(!g.done&&g.p.sid)renderNodes();continue;}
+    const tg=remoteCharTarget(g.p);if(g.x==null){g.x=tg.x;g.y=tg.y;g.h=tg.h;}
+    const kk=g.done?Math.max(k,.35):k;g.x+=(tg.x-g.x)*kk;g.y+=(tg.y-g.y)*kk;g.h+=(tg.h-g.h)*kk;
+    const ar=g.img.naturalWidth?g.img.naturalWidth/g.img.naturalHeight:2/3;
+    g.img.style.height=g.h+'px';g.el.style.transform=`translate(${(g.x-g.h*ar/2).toFixed(1)}px,${(g.y-g.h).toFixed(1)}px)`;
+    // soltou fora de um palco: some; soltou num palco: a cena sincronizada mostra o sprite de verdade
+    g.el.classList.toggle('out',!!g.done);}}
 function onRemoteDrag(row){if(isMine(row.connectionId)||row.storyId!==storyId)return;let moves;try{moves=JSON.parse(row.moves);}catch(_){return;}const p=profOf(row.identity);const now=performance.now();
+  if(Array.isArray(moves[0])&&moves[0][0]==='@char'){onRemoteChar(row,moves[0][1],p,now);return;}
   for(const[id,x,y]of moves){const s=scene(id);if(!s)continue;let r=remoteDrag.get(id);
     if(!r){r={x:s.x,y:dispY(s),color:p.color,name:p.name};remoteDrag.set(id,r);const el=nodeEl(id);if(el){el.classList.add('rdrag');el.style.setProperty('--rc',p.color);el.dataset.who=p.name;}}
     Object.assign(r,{tx:x,ty:y,seen:now,done:row.done});}
@@ -1031,6 +1181,7 @@ function stepRemote(now){const dt=Math.min(250,lastStep?now-lastStep:16);lastSte
     const el=nodeEl(id);
     if(!s||landed||(!r.done&&now-r.seen>2000)){remoteDrag.delete(id);if(el){el.classList.remove('rdrag');el.style.left=(s?s.x:0)+'px';el.style.top=(s?dispY(s):0)+'px';}continue;}
     if(el){el.style.left=r.x+'px';el.style.top=r.y+'px';if(!el.classList.contains('rdrag')){el.classList.add('rdrag');el.style.setProperty('--rc',r.color);el.dataset.who=r.name;}}}
+  stepRemoteChars(now,k);
   for(const c of cursors.values()){c.x+=(c.tx-c.x)*k;c.y+=(c.ty-c.y)*k;c.el.style.transform=`translate(${c.x}px,${c.y}px) scale(${1/view.z})`;}}
 function syncCursors(){if(!conn)return;if(!cursorLayer){cursorLayer=document.createElement('div');cursorLayer.className='rcursors';world.appendChild(cursorLayer);}
   const live=new Set;
