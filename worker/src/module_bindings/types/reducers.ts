@@ -6,6 +6,7 @@
 import { type Infer as __Infer } from "spacetimedb";
 
 // Import all reducer arg schemas
+import AddPoseReducer from "../add_pose_reducer";
 import ApplyOperationsReducer from "../apply_operations_reducer";
 import CancelInviteReducer from "../cancel_invite_reducer";
 import ClaimJobReducer from "../claim_job_reducer";
@@ -15,6 +16,8 @@ import CompleteJobReducer from "../complete_job_reducer";
 import CreateStoryReducer from "../create_story_reducer";
 import DeleteStoryReducer from "../delete_story_reducer";
 import FailJobReducer from "../fail_job_reducer";
+import GenerateBackgroundReducer from "../generate_background_reducer";
+import GenerateCharacterReducer from "../generate_character_reducer";
 import JoinByLinkReducer from "../join_by_link_reducer";
 import LockFieldReducer from "../lock_field_reducer";
 import OpenStoryReducer from "../open_story_reducer";
@@ -27,12 +30,14 @@ import RenameStoryReducer from "../rename_story_reducer";
 import RenewFieldLockReducer from "../renew_field_lock_reducer";
 import RequestAiReducer from "../request_ai_reducer";
 import ResetStoryReducer from "../reset_story_reducer";
+import RetryGenerationReducer from "../retry_generation_reducer";
 import SendDragReducer from "../send_drag_reducer";
 import SetLinkAccessReducer from "../set_link_access_reducer";
 import SetProfileReducer from "../set_profile_reducer";
 import ShareStoryReducer from "../share_story_reducer";
 import UpdateCursorReducer from "../update_cursor_reducer";
 
+export type AddPoseParams = __Infer<typeof AddPoseReducer>;
 export type ApplyOperationsParams = __Infer<typeof ApplyOperationsReducer>;
 export type CancelInviteParams = __Infer<typeof CancelInviteReducer>;
 export type ClaimJobParams = __Infer<typeof ClaimJobReducer>;
@@ -42,6 +47,8 @@ export type CompleteJobParams = __Infer<typeof CompleteJobReducer>;
 export type CreateStoryParams = __Infer<typeof CreateStoryReducer>;
 export type DeleteStoryParams = __Infer<typeof DeleteStoryReducer>;
 export type FailJobParams = __Infer<typeof FailJobReducer>;
+export type GenerateBackgroundParams = __Infer<typeof GenerateBackgroundReducer>;
+export type GenerateCharacterParams = __Infer<typeof GenerateCharacterReducer>;
 export type JoinByLinkParams = __Infer<typeof JoinByLinkReducer>;
 export type LockFieldParams = __Infer<typeof LockFieldReducer>;
 export type OpenStoryParams = __Infer<typeof OpenStoryReducer>;
@@ -54,6 +61,7 @@ export type RenameStoryParams = __Infer<typeof RenameStoryReducer>;
 export type RenewFieldLockParams = __Infer<typeof RenewFieldLockReducer>;
 export type RequestAiParams = __Infer<typeof RequestAiReducer>;
 export type ResetStoryParams = __Infer<typeof ResetStoryReducer>;
+export type RetryGenerationParams = __Infer<typeof RetryGenerationReducer>;
 export type SendDragParams = __Infer<typeof SendDragReducer>;
 export type SetLinkAccessParams = __Infer<typeof SetLinkAccessReducer>;
 export type SetProfileParams = __Infer<typeof SetProfileReducer>;

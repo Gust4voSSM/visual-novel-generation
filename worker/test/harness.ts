@@ -27,6 +27,7 @@ export const EDITOR_QUERIES = [
   'SELECT * FROM my_account', 'SELECT * FROM my_stories', 'SELECT * FROM my_memberships',
   'SELECT * FROM cur_story', 'SELECT * FROM cur_scene', 'SELECT * FROM cur_choice',
   'SELECT * FROM my_ai_job', 'SELECT * FROM my_chat_message', 'SELECT * FROM chat_chunk WHERE requester = :sender',
+  'SELECT * FROM cur_character', 'SELECT * FROM cur_sprite', 'SELECT * FROM cur_background',
 ];
 
 export const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));

@@ -6,12 +6,19 @@
     "start": "tsx --env-file=.env --env-file-if-exists=.env.openai src/index.ts",
     "test": "tsx --env-file=.env --env-file-if-exists=.env.openai test/correctness.ts",
     "test:stories": "tsx --env-file=.env test/stories.ts",
-    "load": "tsx --env-file=.env --env-file-if-exists=.env.openai test/load.ts"
+    "load": "tsx --env-file=.env --env-file-if-exists=.env.openai test/load.ts",
+    "typecheck": "tsc -p .",
+    "t0": "python -I test/t0_ref.py ../../output/imagegen experiments/t0/py && tsx test/t0-keyer.ts ../../output/imagegen experiments/t0/py experiments/t0/node",
+    "test:images": "tsx test/pipeline-offline.ts ../../output/imagegen",
+    "images:e2e": "tsx --env-file=.env --env-file-if-exists=.env.openai test/images-e2e.ts"
   },
   "dependencies": {
+    "sharp": "^0.34.5",
     "spacetimedb": "^2.13.0"
   },
   "devDependencies": {
-    "tsx": "^4.20.0"
+    "@types/node": "^22.20.5",
+    "tsx": "^4.20.0",
+    "typescript": "^5.9.3"
   }
 }

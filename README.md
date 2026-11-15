@@ -162,9 +162,11 @@ Para usar a OpenAI, troque para `AI_PROVIDER=openai` em `worker/.env`, publique 
 Chat, cena sugerida, ação sugerida, completar texto, personagem e background passam a usar a OpenAI.
 O editor pede tudo ao worker; as procedures `suggest_scene` e `complete_text` continuam só com o mock. Opcionais em `worker/.env.openai`:
 `OPENAI_CHAT_MODEL` (padrão `gpt-6-luna`), `OPENAI_REASONING_EFFORT` (padrão `low` nos gpt-5/gpt-6),
-`OPENAI_IMAGE_MODEL` (padrão `gpt-image-1`) e `OPENAI_IMAGE_QUALITY` (padrão `low`). As imagens geradas
-vão para `client/public/generated/` (ou `IMAGE_DIR`); o upload ao R2 fica para o deploy. O `gpt-image-1`
-exige organização verificada na OpenAI.
+`OPENAI_IMAGE_MODEL` (padrão `gpt-image-2`) e `OPENAI_IMAGE_QUALITY` (padrão `low`). As imagens geradas
+vão para o KV pelas Pages Functions quando o worker tem `IMAGE_API_URL` (veja "Elenco e imagens");
+sem ela, para `client/public/generated/` (ou `IMAGE_DIR`). Os modelos de imagem
+exigem organização verificada na OpenAI. Sprites (charsheet, cor-chave, caminho nativo) e backgrounds:
+veja [worker/IMAGENS-EXPERIMENTO.md](worker/IMAGENS-EXPERIMENTO.md).
 
 ```bash
 cd worker && set -a && . ./.env && set +a && cd .. && spacetime publish -s local -p server -y roteiro-spike-ai
@@ -178,9 +180,63 @@ npm --prefix worker install && npm --prefix worker start
 npm --prefix client run dev -- --port 5174 --mode ai-local
 ```
 
-Testes (com o worker rodando): `npm --prefix worker test` (correção, 19 casos) e
+Testes (com o worker rodando): `npm --prefix worker test` (correção, 23 casos) e
 `npm --prefix worker run load` (5 pessoas editando, sem e com IA ao mesmo tempo). Os dois
 recriam a história de teste; "↺ demo" no editor volta ao exemplo.
+
+## Elenco e imagens
+
+Personagens, sprites, backgrounds e charsheets ficam em tabelas do módulo (`character`, `sprite`,
+`background`, `charsheet`), por história, lidas pelas views `cur_*`. As imagens são só links
+(`image_key`), nunca bytes:
+
+| `image_key` | Onde está |
+| --- | --- |
+| `img/<32 hex>.<png\|jpg\|webp>` | KV do Pages (uploads e imagens geradas), servido por `/img/…` |
+| `example/…svg` | Elenco do exemplo e do marketplace, em `client/public/example/` (`npm --prefix client run example-art`) |
+| `placeholders/…svg` | Imagens do modo mock |
+| `generated/…` | Disco local do worker (experimentos de antes do KV) |
+
+O módulo recusa qualquer outro valor (URLs de fora, `data:`).
+
+- Editar nome, descrição, cor e imagens vai por `apply_operations` (operações `upsert_/delete_`
+  `character`, `sprite` e `background`), com desfazer como as cenas. Apagar algo que uma cena
+  usa dá `USED`.
+- Gerar não prende a tela:
+  - `generate_character` cria o personagem e as poses já como "gerando" e põe o charsheet na fila.
+  - Quando o charsheet fica pronto, o módulo põe cada pose num pedido próprio; uma falha marca só aquela pose.
+  - `add_pose` pede uma pose nova; `generate_background` pede um background; `retry_generation` tenta de novo.
+  - O andamento fica nas linhas: recarregar a página não perde nada.
+- Histórias de antes das tabelas: quem edita, ao abri-las, grava o elenco de exemplo com ids
+  próprios da história e as cenas passam a apontar para ele. Personagens gerados ou enviados
+  naquela época ficavam só no navegador e não voltam.
+
+**Envio de imagens.** `POST /api/upload` (Pages Function) aceita PNG, JPEG ou WebP até 8 MB e devolve `{key}`.
+- Pessoas: precisam da sessão de login (o cookie) e da mesma origem.
+- Worker: manda `Authorization: Bearer <WORKER_SECRET>`.
+- Os bytes vão para o KV ligado como `IMAGES`. `GET /img/<chave>` lê de lá, com cache imutável na borda.
+
+**Produção (uma vez):**
+1. Criar o namespace KV: Cloudflare → Storage & Databases → KV → Create, ex. `roteiro-images`.
+2. No projeto do Pages: Settings → Bindings → Add → KV namespace, nome da variável `IMAGES`, o namespace acima (Production e Preview).
+3. No projeto do Pages: Settings → Variables and Secrets → `WORKER_SECRET` (secreto), o mesmo da VM.
+4. Na VM, em `/etc/roteiro/worker.env`: `IMAGE_API_URL=https://<projeto>.pages.dev`, e reiniciar o worker.
+
+Plano gratuito do KV: 1 GB, 1.000 gravações e 100.000 leituras por dia. Um personagem gerado
+grava 2 + o número de poses.
+
+**Local:** `npm --prefix client run dev:api` (com login) ou `dev:api:anon` (aceita envios sem
+login, para os modos com `VITE_AUTH_DEV_ANON=1`) sobe as Pages Functions na porta 8788 com um KV
+local. O Vite repassa `/api` e `/img` para elas. O worker precisa de `IMAGE_API_URL` e do mesmo
+`WORKER_SECRET` que as Functions:
+
+```bash
+cd client && set -a && . ../worker/.env && set +a && npm run build && npx wrangler pages dev dist --port 8788 --compatibility-date=2026-10-01 --kv IMAGES --binding UPLOAD_DEV_ANON=1 --binding WORKER_SECRET=$WORKER_SECRET
+```
+
+```bash
+cd worker && IMAGE_API_URL=http://localhost:8788 npm start
+```
 
 ## Worker em produção (VM)
 
@@ -188,7 +244,8 @@ O worker de `vn-generation` (Maincloud) roda numa VM e2-micro do Google Cloud (p
 `regal-oasis-512900-b3`, zona `us-east1-b`, `roteiro-worker`). Os arquivos ficam em `worker/deploy/`:
 
 - `setup.sh` prepara uma VM Debian 12 nova (Node 22, usuário `roteiro`, código em `/opt/roteiro/app`).
-- `roteiro-worker.service` roda o worker. Antes de cada início, `openai-key.sh` (como root) busca a
+- `roteiro-worker.service` roda o worker com `/etc/roteiro/worker.env` (`STDB_URI`, `STDB_DB`,
+  `WORKER_SECRET`, `AI_PROVIDER`, `IMAGE_API_URL`; só root lê). Antes de cada início, `openai-key.sh` (como root) busca a
   chave da OpenAI no Secret Manager para `/run/roteiro/openai.env` (memória).
 - `roteiro-update.timer` roda `update.sh` a cada 5 min: segue a branch `deployed/worker`, que o
   workflow `deploy` move depois de publicar o módulo, e reinicia o worker se a chave da OpenAI mudou.
@@ -203,7 +260,7 @@ segredo e as permissões (rodar uma vez, do PC; para a VM por ~1 min ao trocar a
 | Segredo | Onde | Para quê |
 |---|---|---|
 | Chave da OpenAI | Secret Manager `openai-api-key` (produção); `worker/.env.openai` (local) | o worker chamar a OpenAI. **Não** vai para o GitHub. |
-| `WORKER_SECRET` | GitHub (Actions) **e** `/etc/roteiro/worker.env` na VM, iguais | senha entre o módulo e o worker (`register_worker`). **Não** é a chave da OpenAI. |
+| `WORKER_SECRET` | GitHub (Actions), `/etc/roteiro/worker.env` na VM **e** segredo do projeto no Pages, iguais | senha entre o módulo e o worker (`register_worker`) e do worker para enviar imagens (`/api/upload`). **Não** é a chave da OpenAI. |
 | `SPACETIMEDB_TOKEN`, `CLOUDFLARE_*` | GitHub (Actions) | publicar o módulo e o site. |
 | Chave de deploy | `/etc/roteiro/deploy_key` na VM (só root) + "Deploy keys" do repositório | a VM ler o repositório. |
 
@@ -229,7 +286,6 @@ Logs: `gcloud compute ssh roteiro-worker --project=regal-oasis-512900-b3 --zone=
 ## Fora deste spike
 
 - Login com Google (precisa de um OAuth client ID) — conexões são anônimas, uma identidade por aba.
-- Personagens e backgrounds ficam só no navegador (ids fixos no exemplo); só o grafo sincroniza.
-- Provedores reais de IA e upload ao R2 (o caminho inteiro já roda com o mock acima).
+- O marketplace é de mentira: os itens ficam no código do cliente (incluir copia para as tabelas da história).
 - A interface é otimista (mostra a mudança na hora e desfaz se o servidor recusar); a
   especificação prevê esperar o servidor, salvo se a latência passar de 300 ms.

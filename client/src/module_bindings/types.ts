@@ -47,6 +47,48 @@ export const AiRate = __t.object("AiRate", {
 });
 export type AiRate = __Infer<typeof AiRate>;
 
+export const Background = __t.object("Background", {
+  id: __t.string(),
+  storyId: __t.string(),
+  name: __t.string(),
+  desc: __t.string(),
+  imageKey: __t.string(),
+  baseKey: __t.string(),
+  source: __t.string(),
+  status: __t.string(),
+  error: __t.string(),
+  createdAt: __t.timestamp(),
+});
+export type Background = __Infer<typeof Background>;
+
+export const Character = __t.object("Character", {
+  id: __t.string(),
+  storyId: __t.string(),
+  name: __t.string(),
+  desc: __t.string(),
+  color: __t.string(),
+  source: __t.string(),
+  sheetId: __t.string(),
+  status: __t.string(),
+  error: __t.string(),
+  createdAt: __t.timestamp(),
+});
+export type Character = __Infer<typeof Character>;
+
+export const Charsheet = __t.object("Charsheet", {
+  id: __t.string(),
+  storyId: __t.string(),
+  characterId: __t.string(),
+  design: __t.string(),
+  front: __t.string(),
+  side: __t.string(),
+  keyColor: __t.string(),
+  keyScores: __t.string(),
+  unit: __t.string(),
+  createdAt: __t.timestamp(),
+});
+export type Charsheet = __Infer<typeof Charsheet>;
+
 export const ChatChunk = __t.object("ChatChunk", {
   jobId: __t.string(),
   requester: __t.identity(),
@@ -86,6 +128,15 @@ export type Config = __Infer<typeof Config>;
 export const CurAccount = __t.object("CurAccount", {});
 export type CurAccount = __Infer<typeof CurAccount>;
 
+export const CurBackground = __t.object("CurBackground", {});
+export type CurBackground = __Infer<typeof CurBackground>;
+
+export const CurCharacter = __t.object("CurCharacter", {});
+export type CurCharacter = __Infer<typeof CurCharacter>;
+
+export const CurCharsheet = __t.object("CurCharsheet", {});
+export type CurCharsheet = __Infer<typeof CurCharsheet>;
+
 export const CurChoice = __t.object("CurChoice", {});
 export type CurChoice = __Infer<typeof CurChoice>;
 
@@ -109,6 +160,9 @@ export type CurProfile = __Infer<typeof CurProfile>;
 
 export const CurScene = __t.object("CurScene", {});
 export type CurScene = __Infer<typeof CurScene>;
+
+export const CurSprite = __t.object("CurSprite", {});
+export type CurSprite = __Infer<typeof CurSprite>;
 
 export const CurStory = __t.object("CurStory", {});
 export type CurStory = __Infer<typeof CurStory>;
@@ -188,6 +242,20 @@ export const Scene = __t.object("Scene", {
 });
 export type Scene = __Infer<typeof Scene>;
 
+export const Sprite = __t.object("Sprite", {
+  id: __t.string(),
+  storyId: __t.string(),
+  characterId: __t.string(),
+  name: __t.string(),
+  desc: __t.string(),
+  imageKey: __t.string(),
+  position: __t.u32(),
+  status: __t.string(),
+  error: __t.string(),
+  meta: __t.string(),
+});
+export type Sprite = __Infer<typeof Sprite>;
+
 export const Story = __t.object("Story", {
   id: __t.string(),
   ownerId: __t.identity(),
@@ -229,6 +297,12 @@ export const Sweep = __t.object("Sweep", {
 });
 export type Sweep = __Infer<typeof Sweep>;
 
+export const WorkerBackground = __t.object("WorkerBackground", {});
+export type WorkerBackground = __Infer<typeof WorkerBackground>;
+
+export const WorkerCharacter = __t.object("WorkerCharacter", {});
+export type WorkerCharacter = __Infer<typeof WorkerCharacter>;
+
 export const WorkerChoice = __t.object("WorkerChoice", {});
 export type WorkerChoice = __Infer<typeof WorkerChoice>;
 
@@ -237,6 +311,9 @@ export type WorkerQueue = __Infer<typeof WorkerQueue>;
 
 export const WorkerScene = __t.object("WorkerScene", {});
 export type WorkerScene = __Infer<typeof WorkerScene>;
+
+export const WorkerSprite = __t.object("WorkerSprite", {});
+export type WorkerSprite = __Infer<typeof WorkerSprite>;
 
 export const WorkerStory = __t.object("WorkerStory", {});
 export type WorkerStory = __Infer<typeof WorkerStory>;

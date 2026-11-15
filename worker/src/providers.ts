@@ -1,5 +1,7 @@
 // Provedores de IA do worker (seção 2.6): mock e OpenAI. A chave da OpenAI vem de
 // worker/.env.openai e só este processo a lê.
+import type { KeyColorName } from './imaging/keyer';
+import { ImagePipeline, type ImageApi, type ImageCall, type ImageCallResult, type Unit } from './imaging/pipeline';
 
 export type StoryScene = {
   id: string; title: string; x: number; y: number; text: string; next: string; bg: string;
@@ -29,8 +31,20 @@ export type ChatInput = { message: string; context: AiContext; history?: ChatTur
 export type ChatResult = { content: string; proposals: Proposal[]; thoughts?: string };
 // Proposta ainda chegando do modelo: o que já dá para ler dela, para o cliente mostrar o andamento.
 export type ProposalProgress = { attempt: number; criar: string[]; alterar: string[]; remover: string[]; ligar: number };
-export type ImageRequest = { kind: 'sprite' | 'background'; prompt: string; hint: string };
-export type GeneratedImage = { bytes?: Uint8Array; contentType?: string; placeholderKey?: string };
+// Pedidos de imagem (PLANO-SPRITES-BACKGROUNDS.md, seção 5). 'sprite' é a geração única antiga.
+// Charsheet: 'reference' front (só texto) e side (edit com o front); 'pose' é edit com front + side,
+// pelos ids das referências (bytes carregados pelo worker). Backgrounds: base e variantes (edit da base).
+export type ImageRef = { id: string; bytes?: Uint8Array };
+export type PoseRefs = { sheetId: string; front: ImageRef; side: ImageRef; keyColor: KeyColorName | null; unit?: Unit };
+export type ImageRequest =
+  | { kind: 'sprite'; prompt: string; hint: string }
+  | { kind: 'background'; prompt: string; hint: string; time?: string; mood?: string }
+  | { kind: 'background-variant'; base: ImageRef; variant: string; hint: string }
+  | { kind: 'reference'; reference: 'front' | 'side'; design: string; front?: ImageRef; hint: string }
+  | { kind: 'pose'; design: string; pose: string; hint: string; refs: PoseRefs; compare?: boolean };
+// meta: o que o pipeline mediu (unidade e cor-chave do front, caminho e verificações da pose).
+// base: background antes do recorte para o palco, para as variantes.
+export type GeneratedImage = { bytes?: Uint8Array; contentType?: string; placeholderKey?: string; meta?: Record<string, unknown>; base?: Uint8Array };
 
 // Cena sugerida para uma saída (Shift ao arrastar um fio): mesmo formato da procedure suggest_scene.
 export type SceneInput = { sourceSceneId: string; choiceId: string; instruction: string; context: AiContext };
@@ -93,7 +107,7 @@ export function emotionKind(text: string): string {
 
 export function backgroundKind(text: string): string {
   const t = norm(text);
-  if (/noite|estrel|farol|lua/.test(t)) return 'night';
+  if (/noite|estrel|farol|lua|night/.test(t)) return 'night';
   if (/praia|mar|litoral|oceano|mangue|rio/.test(t)) return 'water';
   if (/quarto|casa|interior|sala|cafe|bar|escola|aula/.test(t)) return 'interior';
   return 'day';
@@ -120,8 +134,10 @@ class MockProvider implements AiProvider {
 
   async image(req: ImageRequest, signal: AbortSignal): Promise<GeneratedImage> {
     await sleep(IMAGE_MS * (0.6 + Math.random() * 0.8), signal);
-    if (/#falha/i.test(req.prompt)) throw new Error('AI_PROVIDER_ERROR');
-    const key = req.kind === 'sprite' ? `placeholders/sprite-${emotionKind(req.hint)}.svg` : `placeholders/bg-${backgroundKind(req.hint)}.svg`;
+    if (/#falha/i.test(('prompt' in req ? req.prompt : '') + ' ' + req.hint)) throw new Error('AI_PROVIDER_ERROR');
+    const key = req.kind === 'sprite' || req.kind === 'pose' || req.kind === 'reference'
+      ? `placeholders/sprite-${emotionKind(req.hint)}.svg`
+      : `placeholders/bg-${backgroundKind(req.kind === 'background-variant' ? req.variant : req.hint)}.svg`;
     return { placeholderKey: key };
   }
 
@@ -271,9 +287,72 @@ const OPENAI_URL = 'https://api.openai.com/v1';
 // gpt-5.5), foi o mais rápido (1º texto em ~1 s, resposta em ~3 s) com propostas válidas e boa qualidade.
 const CHAT_MODEL = process.env.OPENAI_CHAT_MODEL ?? 'gpt-6-luna';
 const REASONING_EFFORT = process.env.OPENAI_REASONING_EFFORT ?? (/^(gpt-[56]|o\d)/.test(CHAT_MODEL) ? 'low' : undefined);
-const IMAGE_MODEL =process.env.OPENAI_IMAGE_MODEL ?? 'gpt-image-1';
+const IMAGE_MODEL = process.env.OPENAI_IMAGE_MODEL ?? 'gpt-image-2';
 const IMAGE_QUALITY = process.env.OPENAI_IMAGE_QUALITY ?? 'low'; // low | medium | high
 const clip = (s: string, n: number) => (s.length > n ? s.slice(0, n) + '…' : s);
+// Preço por 1M de tokens (US$) para o custo no modo experimento. Sem os três, o custo fica null
+// e o meta.json guarda só o usage da resposta.
+const IMAGE_PRICE = ['OPENAI_IMAGE_PRICE_TEXT_IN', 'OPENAI_IMAGE_PRICE_IMAGE_IN', 'OPENAI_IMAGE_PRICE_IMAGE_OUT'].map(k => Number(process.env[k]));
+
+/** Chamadas a /images/generations e /images/edits (multipart, várias imagens de referência). */
+export class OpenAiImageApi implements ImageApi {
+  readonly model = IMAGE_MODEL;
+  constructor(private readonly key: string) {}
+
+  async call(c: ImageCall, signal: AbortSignal): Promise<ImageCallResult> {
+    const fields: Record<string, string> = {
+      model: c.model ?? this.model, prompt: c.prompt, n: '1', size: c.size, quality: c.quality, background: c.background, output_format: 'png',
+    };
+    let init: RequestInit;
+    if (c.endpoint === 'generations') {
+      init = { body: JSON.stringify({ ...fields, n: 1 }), headers: { Authorization: `Bearer ${this.key}`, 'Content-Type': 'application/json' } };
+    } else {
+      const form = new FormData();
+      for (const [k, v] of Object.entries(fields)) form.append(k, v);
+      for (const img of c.images ?? []) form.append('image[]', new Blob([img.bytes as Uint8Array<ArrayBuffer>], { type: 'image/png' }), img.name);
+      init = { body: form, headers: { Authorization: `Bearer ${this.key}` } };
+    }
+    const t0 = performance.now();
+    let res: Response;
+    try {
+      res = await fetch(`${OPENAI_URL}/images/${c.endpoint}`, { method: 'POST', signal, ...init });
+    } catch (e) {
+      if (signal.aborted) throw new Error('TIMEOUT');
+      console.error('openai: falha de rede (imagem)', e);
+      throw new Error('AI_PROVIDER_ERROR');
+    }
+    if (!res.ok) {
+      const body = await res.text().catch(() => '');
+      console.error(`openai /images/${c.endpoint}: HTTP ${res.status}`, clip(body, 400));
+      throw Object.assign(new Error('AI_PROVIDER_ERROR'), { status: res.status, body });
+    }
+    const json = await res.json();
+    const b64 = json.data?.[0]?.b64_json;
+    if (!b64) { console.error('openai: resposta de imagem sem dados'); throw new Error('AI_PROVIDER_ERROR'); }
+    return { bytes: Buffer.from(b64, 'base64'), model: c.model ?? this.model, ms: Math.round(performance.now() - t0), usage: json.usage, costUsd: imageCost(json.usage) };
+  }
+}
+
+/** Charsheet, poses e variantes de background pelo pipeline (seção 2 e 3 do plano). */
+export async function pipelineImage(p: ImagePipeline, req: Exclude<ImageRequest, { kind: 'sprite' | 'background' }>, signal: AbortSignal): Promise<GeneratedImage> {
+  const need = (r: ImageRef | undefined, what: string) => {
+    if (!r?.bytes) { console.error(`imagem: referência ${what} sem bytes (${r?.id ?? 'ausente'})`); throw new Error('INVALID_INPUT'); }
+    return { id: r.id, bytes: r.bytes };
+  };
+  if (req.kind === 'reference') return req.reference === 'front' ? p.front(req.design, signal) : p.side(req.design, need(req.front, 'front'), signal);
+  if (req.kind === 'background-variant') return p.variant(need(req.base, 'base'), req.variant, signal);
+  if (!req.refs.unit) { console.error('imagem: pose sem a unidade do front'); throw new Error('INVALID_INPUT'); }
+  return p.pose(req.design, req.pose, {
+    sheetId: req.refs.sheetId, front: need(req.refs.front, 'front'), side: need(req.refs.side, 'side'), keyColor: req.refs.keyColor, unit: req.refs.unit,
+  }, signal, { compare: req.compare });
+}
+
+function imageCost(u: any): number | null {
+  if (!u || IMAGE_PRICE.some(p => !Number.isFinite(p))) return null;
+  const d = u.input_tokens_details ?? {};
+  const text = d.text_tokens ?? 0, image = d.image_tokens ?? Math.max(0, (u.input_tokens ?? 0) - text);
+  return (text * IMAGE_PRICE[0] + image * IMAGE_PRICE[1] + (u.output_tokens ?? 0) * IMAGE_PRICE[2]) / 1e6;
+}
 // Tentativas por mensagem do chat quando a proposta vem inválida (a primeira + correções).
 const CHAT_ATTEMPTS = Math.max(1, Number(process.env.OPENAI_CHAT_ATTEMPTS ?? '3') || 3);
 // Conversa anterior que vai ao modelo, das mais recentes para trás, até este total de caracteres.
@@ -372,8 +451,10 @@ export type ProposeArgs = {
 class OpenAiProvider implements AiProvider {
   readonly name: string;
   private summaries = true; // desliga sozinho se a organização não puder receber o resumo do raciocínio
+  private readonly pipeline: ImagePipeline;
   constructor(private readonly key: string, private readonly images: AiProvider | null) {
-    this.name = images ? 'openai (imagens: mock)' : 'openai';
+    this.name = images ? 'openai (imagens: mock)' : `openai (imagens: ${IMAGE_MODEL})`;
+    this.pipeline = new ImagePipeline(new OpenAiImageApi(key));
   }
 
   private async post(path: string, body: unknown, signal: AbortSignal): Promise<Response> {
@@ -581,15 +662,15 @@ class OpenAiProvider implements AiProvider {
 
   async image(req: ImageRequest, signal: AbortSignal): Promise<GeneratedImage> {
     if (this.images) return this.images.image(req, signal);
-    const sprite = req.kind === 'sprite';
-    const prompt = sprite
-      ? `Sprite de personagem para visual novel, estilo anime, corpo da cintura para cima, de frente, fundo transparente, sem texto. ${req.prompt}`
-      : `Cenário de fundo para visual novel, estilo anime, sem personagens, sem texto, composição horizontal. ${req.prompt}`;
+    if (req.kind !== 'sprite' && req.kind !== 'background') return pipelineImage(this.pipeline, req, signal);
+    if (req.kind === 'background') return this.pipeline.background(req.prompt, req.time ?? '', req.mood ?? '', signal);
+    // Geração única antiga (sem charsheet), mantida para pedidos 'sprite'.
+    const prompt = `Sprite de personagem para visual novel, estilo anime, corpo da cintura para cima, de frente, fundo transparente, sem texto. ${req.prompt}`;
     const res = await this.post('/images/generations', {
       model: IMAGE_MODEL, prompt, n: 1,
-      size: sprite ? '1024x1536' : '1536x1024',
+      size: '1024x1536',
       quality: IMAGE_QUALITY,
-      background: sprite ? 'transparent' : 'opaque',
+      background: 'transparent',
       output_format: 'webp',
       output_compression: 80,
     }, signal);
