@@ -1280,6 +1280,22 @@ export const upload_charsheet = spacetimedb.reducer(
   }
 );
 
+// Remove o charsheet: o personagem volta a "sem charsheet". As poses já enviadas ou geradas ficam;
+// as que esperavam pelo charsheet falham com NO_SHEET (dá para tentar de novo depois).
+export const remove_charsheet = spacetimedb.reducer(
+  { storyId: t.string(), characterId: t.string() },
+  (ctx, { storyId, characterId }) => {
+    requireRole(ctx, storyId, 'editor');
+    const c = ctx.db.character.id.find(characterId);
+    if (!c || c.storyId !== storyId) throw new SenderError('NOT_FOUND');
+    if (c.status === 'generating') throw new SenderError('BUSY');
+    for (const cs of [...ctx.db.charsheet.characterId.filter(characterId)]) ctx.db.charsheet.id.delete(cs.id);
+    ctx.db.character.id.update({ ...c, sheetId: '', status: '', error: '' });
+    for (const sp of [...ctx.db.sprite.characterId.filter(characterId)])
+      if (sp.status === 'pending') ctx.db.sprite.id.update({ ...sp, status: 'failed', error: 'NO_SHEET' });
+  }
+);
+
 export const generate_background = spacetimedb.reducer(
   { storyId: t.string(), backgroundId: t.string(), jobId: t.string(), name: t.string(), desc: t.string() },
   (ctx, { storyId, backgroundId, jobId, name, desc }) => {

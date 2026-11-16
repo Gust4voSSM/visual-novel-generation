@@ -53,6 +53,7 @@ import PingReducer from "./ping_reducer";
 import PushChatChunkReducer from "./push_chat_chunk_reducer";
 import RegisterWorkerReducer from "./register_worker_reducer";
 import ReleaseFieldReducer from "./release_field_reducer";
+import RemoveCharsheetReducer from "./remove_charsheet_reducer";
 import RemoveMemberReducer from "./remove_member_reducer";
 import RenameStoryReducer from "./rename_story_reducer";
 import RenewFieldLockReducer from "./renew_field_lock_reducer";
@@ -337,6 +338,7 @@ const reducersSchema = __reducers(
   __reducerSchema("push_chat_chunk", PushChatChunkReducer),
   __reducerSchema("register_worker", RegisterWorkerReducer),
   __reducerSchema("release_field", ReleaseFieldReducer),
+  __reducerSchema("remove_charsheet", RemoveCharsheetReducer),
   __reducerSchema("remove_member", RemoveMemberReducer),
   __reducerSchema("rename_story", RenameStoryReducer),
   __reducerSchema("renew_field_lock", RenewFieldLockReducer),

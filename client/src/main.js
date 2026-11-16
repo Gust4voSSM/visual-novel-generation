@@ -2688,7 +2688,9 @@ function sheetHTML(c) {
         ([l, k]) =>
           `<figure><img src="${esc(imgUrl(k))}" alt="${esc(c.name)}: ${l}"><figcaption>${l}</figcaption></figure>`,
       )
-      .join('')}</div><div class="row">${sheetUpload('trocar charsheet')}</div>`;
+      .join(
+        '',
+      )}</div><div class="row">${sheetUpload('trocar charsheet')}<button class="addbtn" data-rmsheet>remover charsheet</button></div>`;
   if (c.status === 'generating')
     return '<div class="sheet empty-sheet"><span class="spinner"></span>gerando o charsheet…</div>';
   return `<div class="sheet empty-sheet"><span>${c.status === 'failed' ? 'O charsheet falhou. Gere de novo ou envie o seu.' : 'Sem charsheet. As poses com IA são geradas a partir dele.'}</span><div class="row" style="justify-content:center;flex-wrap:wrap"><button class="addbtn ai" data-gensheet title="Frente e perfil do personagem, gerados a partir da descrição.">${SPARK13()}gerar charsheet com IA</button>${sheetUpload('enviar charsheet')}</div></div>`;
@@ -2931,6 +2933,18 @@ onCast('click', (e) => {
       renderRail();
       refresh();
     } else if (e.target.closest('[data-aipose]')) askPose(c);
+    else if (e.target.closest('[data-rmsheet]'))
+      askConfirm({
+        title: 'Remover charsheet',
+        text: `O charsheet de ${esc(c.name)} será apagado. As poses que já existem continuam; para gerar novas com IA, será preciso outro charsheet.`,
+        ok: 'Remover',
+        danger: true,
+      }).then((yes) => {
+        if (yes)
+          conn.reducers
+            .removeCharsheet({ storyId, characterId: c.id })
+            .then(() => toast('Charsheet removido'), castFailed('remover o charsheet'));
+      });
     else if (e.target.closest('[data-needsheet]')) {
       const g = charEd.querySelector('[data-gensheet]');
       if (g) {
