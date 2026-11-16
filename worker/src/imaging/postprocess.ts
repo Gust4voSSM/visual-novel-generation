@@ -209,7 +209,7 @@ export function contentBox(img: RgbaImage, threshold = 8): Box | null {
 }
 
 /** Personagem num fundo sólido (charsheet): maior componente a mais de `dist` da cor dos cantos. */
-export function solidSubject(img: RgbImage, dist = 48): { mask: Uint8Array; box: Box; area: number; background: [number, number, number] } {
+export function solidSubject(img: RgbImage, dist = 24, bridge = 8): { mask: Uint8Array; box: Box; area: number; background: [number, number, number] } {
   const { width: w, height: h, data } = img;
   const bg = sampleCorners(img).background;
   const m = new Uint8Array(w * h);
@@ -217,7 +217,10 @@ export function solidSubject(img: RgbImage, dist = 48): { mask: Uint8Array; box:
     const dr = data[p * 3] - bg[0], dg = data[p * 3 + 1] - bg[1], db = data[p * 3 + 2] - bg[2];
     m[p] = dr * dr + dg * dg + db * db > dist * dist ? 1 : 0;
   }
-  const { labels, comps } = components(m, w, h);
+  // Roupa ou sapato escuro sobre o fundo preto some na máscara e parte o personagem em pedaços
+  // (ex.: calça marrom-escura e sapato preto separados do tronco). Os componentes saem da máscara
+  // dilatada, que liga os pedaços pelo contorno; a máscara final continua só com os pixels reais.
+  const { labels, comps } = components(dilate(m, w, h, bridge), w, h);
   if (!comps.length) throw new Error('charsheet sem personagem');
   const main = comps.reduce((a, b) => (b.area > a.area ? b : a));
   // Mantém o maior e os pedaços grandes dentro da caixa dele (ex.: cauda separada pelo contorno).
@@ -227,7 +230,7 @@ export function solidSubject(img: RgbImage, dist = 48): { mask: Uint8Array; box:
   const box: Box = { x0: w, y0: h, x1: 0, y1: 0 };
   let area = 0;
   for (let p = 0; p < m.length; p++) {
-    m[p] = labels[p] && keep.has(labels[p]) ? 1 : 0;
+    m[p] = m[p] && labels[p] && keep.has(labels[p]) ? 1 : 0;
     if (!m[p]) continue;
     area++;
     const x = p % w, y = (p - x) / w;
