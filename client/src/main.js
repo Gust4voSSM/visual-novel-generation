@@ -64,10 +64,14 @@ function makeBg(def, src) {
 // Personagens sem posição (IA, dados antigos) caem nos slots fixos.
 // k: escala do sprite (1 = altura padrão do palco); roda do mouse sobre o personagem muda.
 const SPRITE_H = 0.96,
-  POS_Y_MAX = 45,
   K_MIN = 0.4,
-  K_MAX = 2;
+  K_MAX = 3.5,
+  POS_VIS = 12; // % do quadro que sempre fica visível do personagem (não some por baixo nem por cima)
 const clampK = (k) => +Math.max(K_MIN, Math.min(K_MAX, k || 1)).toFixed(2);
+// Limites de y proporcionais à altura do sprite: um corpo inteiro em escala grande pode descer
+// até mostrar só o busto, e qualquer um pode subir até restar POS_VIS do quadro abaixo do topo.
+const clampY = (y, k) => +Math.max(-(100 - POS_VIS), Math.min(SPRITE_H * 100 * clampK(k) - POS_VIS, y)).toFixed(1);
+const clampX = (x) => +Math.max(0, Math.min(100, x)).toFixed(1);
 function posOf(s, i) {
   const cc = s.chars[i];
   const k = clampK(cc.k);
@@ -328,6 +332,32 @@ function reaches(from, to) {
     if (s) st.push(...outs(s));
   }
   return false;
+}
+// Troca o background de uma cena e leva a troca adiante: as cenas seguintes que ainda usavam o
+// background antigo (herdado quando foram criadas a partir desta) passam a usar o novo.
+function applyBg(s, bid) {
+  const old = s.bg || null;
+  if (old === bid) return 0;
+  const seen = new Set([s.id]),
+    st = [s],
+    now = performance.now();
+  let n = 0;
+  while (st.length) {
+    const x = st.pop();
+    x.bg = bid;
+    n++;
+    if (bid) {
+      reveal.set(x.id, now);
+      setTimeout(() => reveal.delete(x.id), 1700);
+    }
+    for (const id of outs(x)) {
+      const c = scene(id);
+      if (!c || seen.has(id) || (c.bg || null) !== old) continue;
+      seen.add(id);
+      st.push(c);
+    }
+  }
+  return n;
 }
 const isFinal = (s) => !s.choices.length && !s.next;
 const edgeKey = (sid, ch) => sid + '|' + (ch || '');
@@ -1712,11 +1742,7 @@ nodesEl.addEventListener('change', (e) => {
   }
   if (a === 'bg') {
     pushUndo();
-    s.bg = v || null;
-    if (v) {
-      reveal.set(s.id, performance.now());
-      setTimeout(() => reveal.delete(s.id), 1700);
-    }
+    applyBg(s, v || null);
     refresh();
   }
 });
@@ -3099,6 +3125,70 @@ onCast('change', (e) => {
   refresh();
 });
 
+
+/* ---------- backgrounds: arrastar do painel para uma cena ---------- */
+let bdrag = null;
+railBody.addEventListener('pointerdown', (e) => {
+  if (e.button !== 0 || cdrag || bdrag) return;
+  const card = e.target.closest('.card[data-b]');
+  if (!card || !e.target.closest('.card-row')) return;
+  if (e.pointerType === 'touch' && !e.target.closest('.bg-thumb')) return; // no toque, o resto do cartão rola o painel
+  const b = bgById(card.dataset.b);
+  if (!b || !b.img) return;
+  bdrag = { pid: e.pointerId, b, sx: e.clientX, sy: e.clientY, moved: false, g: null, st: null };
+  addEventListener('pointermove', onBgMove);
+  addEventListener('pointerup', onBgUp);
+  addEventListener('pointercancel', onBgUp);
+});
+function bgTarget(x, y) {
+  const n = document.elementFromPoint(x, y)?.closest('.node[data-id]');
+  return n ? n.querySelector('.stage-mini[data-stage]') || n : null;
+}
+function onBgMove(e) {
+  const d = bdrag;
+  if (!d || e.pointerId !== d.pid) return;
+  if (!d.moved) {
+    if (Math.hypot(e.clientX - d.sx, e.clientY - d.sy) < (e.pointerType === 'touch' ? 10 : 5)) return;
+    d.moved = true;
+    railSuppress = true;
+    const g = document.createElement('img');
+    g.className = 'bghost';
+    g.src = d.b.img;
+    g.alt = '';
+    g.draggable = false;
+    document.body.appendChild(g);
+    d.g = g;
+    document.body.classList.add('chardrag');
+  }
+  e.preventDefault();
+  d.g.style.transform = `translate(${e.clientX - 64}px,${e.clientY - 36}px)`;
+  const st = bgTarget(e.clientX, e.clientY);
+  if (st !== d.st) {
+    d.st?.classList.remove('drop-ok');
+    st?.classList.add('drop-ok');
+    d.st = st;
+  }
+}
+function onBgUp(e) {
+  const d = bdrag;
+  if (!d || e.pointerId !== d.pid) return;
+  bdrag = null;
+  removeEventListener('pointermove', onBgMove);
+  removeEventListener('pointerup', onBgUp);
+  removeEventListener('pointercancel', onBgUp);
+  if (!d.moved) return;
+  document.body.classList.remove('chardrag');
+  d.st?.classList.remove('drop-ok');
+  d.g.remove();
+  const node = e.type === 'pointerup' && bgTarget(e.clientX, e.clientY)?.closest('.node[data-id]');
+  const s = node && scene(node.dataset.id);
+  if (!s || s.bg === d.b.id) return;
+  pushUndo();
+  const n = applyBg(s, d.b.id);
+  if (n > 1) toast(`Background aplicado a “${s.title}” e a ${n - 1} cena(s) seguinte(s).`);
+  renderRail();
+  refresh();
+}
 /* ---------- personagens no palco: arrastar do painel, mover, tirar ---------- */
 // Enquanto arrasta, o sprite aparece inteiro; ao pousar, o recorte do palco fecha sobre ele (e abre ao pegar de volta).
 // O fantasma é ancorado na base (centro embaixo), como o sprite no palco, para o pouso não dar salto.
@@ -3202,10 +3292,29 @@ function paintGhost(d, clipTo, p) {
     g.style.clipPath = `inset(${it}px ${ir}px ${ib}px ${il}px round ${(7 * view.z * p).toFixed(1)}px)`;
   } else g.style.clipPath = '';
 }
+// O personagem continua no palco enquanto uma parte razoável dele está dentro do quadro, mesmo com o
+// ponteiro fora (sprites grandes são agarrados longe da base). Medido no tamanho que teria naquele palco.
+function spriteInFrame(d, st) {
+  const r = frameRect(st),
+    th = r.height * SPRITE_H * dk(d),
+    ar = d.g.naturalWidth && d.g.naturalHeight ? d.g.naturalWidth / d.g.naturalHeight : 0.5,
+    w = th * ar,
+    ax = d.px + d.ox * th,
+    ay = d.py + d.oy * th;
+  const iw = Math.min(ax + w / 2, r.right) - Math.max(ax - w / 2, r.left),
+    ih = Math.min(ay, r.bottom) - Math.max(ay - th, r.top);
+  return iw >= Math.min(w * 0.3, r.width * 0.06) && ih >= (r.height * POS_VIS) / 100;
+}
+function stageUnderSprite(d) {
+  const src = d.src.sid && stageEl(d.src.sid);
+  if (src && spriteInFrame(d, src)) return src;
+  for (const st of nodesEl.querySelectorAll('.stage-mini[data-stage]')) if (st !== src && spriteInFrame(d, st)) return st;
+  return null;
+}
 function hoverStage() {
   const d = cdrag;
   const hit = document.elementFromPoint(d.px, d.py);
-  const st = hit && hit.closest('.stage-mini[data-stage]');
+  const st = (hit && hit.closest('.stage-mini[data-stage]')) || stageUnderSprite(d);
   const sid = st ? st.dataset.stage : null;
   nodesEl.querySelectorAll('.drop-ok,.drop-bad').forEach((x) => {
     if (x !== st) x.classList.remove('drop-ok', 'drop-bad');
@@ -3313,10 +3422,11 @@ function snapOnion(d, st, r) {
   st.querySelectorAll('.onion').forEach((o) => {
     o.classList.remove('hit');
     if (d.alt) return;
-    const p = rawPos(d, r, r.height * SPRITE_H * (+o.dataset.k || 1)),
+    const ok = +o.dataset.k || 1,
+      p = rawPos(d, r, r.height * SPRITE_H * ok),
       dx = Math.abs(+o.dataset.x - p.x),
       dy = Math.abs(+o.dataset.y - p.y);
-    if (dx <= SNAP_X && dy <= SNAP_Y && dx + dy < bd) {
+    if (dx <= SNAP_X * ok && dy <= SNAP_Y * ok && dx + dy < bd) {
       bd = dx + dy;
       best = o;
     }
@@ -3524,8 +3634,8 @@ function dropChar(d) {
     d.snap && !d.alt
       ? { ...d.snap }
       : {
-          x: +Math.max(2, Math.min(98, ((ax - r.left) / r.width) * 100)).toFixed(1),
-          y: +Math.max(0, Math.min(POS_Y_MAX, ((ay - r.bottom) / r.height) * 100)).toFixed(1),
+          x: clampX(((ax - r.left) / r.width) * 100),
+          y: clampY(((ay - r.bottom) / r.height) * 100, dk(d)),
           k: dk(d),
         };
   pushUndo();
@@ -5350,8 +5460,8 @@ function sendCharDrag(d, done, cancel) {
     const r = frameRect(st),
       q = d.snap && !d.alt ? d.snap : rawPos(d, r, r.height * SPRITE_H * dk(d));
     pos = {
-      x: +Math.max(2, Math.min(98, q.x)).toFixed(1),
-      y: +Math.max(0, Math.min(POS_Y_MAX, q.y)).toFixed(1),
+      x: clampX(q.x),
+      y: clampY(q.y, dk(d)),
       k: dk(d),
     };
   }
