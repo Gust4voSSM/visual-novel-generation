@@ -1254,6 +1254,48 @@ export const add_pose = spacetimedb.reducer(
   }
 );
 
+// Charsheet enviado pelo autor (frente + perfil), no lugar de gerar com IA. Sem cor-chave nem
+// unidade: as poses com IA usam o caminho nativo. Poses que esperavam o charsheet entram na fila.
+export const upload_charsheet = spacetimedb.reducer(
+  { storyId: t.string(), characterId: t.string(), sheetId: t.string(), front: t.string(), side: t.string() },
+  (ctx, { storyId, characterId, sheetId, front, side }) => {
+    requireRole(ctx, storyId, 'editor');
+    if (!validId(sheetId) || !front || !side || !imageKeyOk(front) || !imageKeyOk(side)) throw new SenderError('INVALID');
+    const c = ctx.db.character.id.find(characterId);
+    if (!c || c.storyId !== storyId) throw new SenderError('NOT_FOUND');
+    if (c.sheetId === sheetId) return; // reenvio
+    if (ctx.db.charsheet.id.find(sheetId)) throw new SenderError('INVALID');
+    if (c.status === 'generating') throw new SenderError('BUSY');
+    if (c.sheetId) ctx.db.charsheet.id.delete(c.sheetId);
+    ctx.db.charsheet.insert({
+      id: sheetId, storyId, characterId, design: designOf(c), front, side, keyColor: '', keyScores: 'null', unit: '', createdAt: ctx.timestamp,
+    });
+    ctx.db.character.id.update({ ...c, sheetId, status: '', error: '' });
+    for (const sp of [...ctx.db.sprite.characterId.filter(characterId)]) {
+      if (sp.status !== 'pending') continue;
+      if (!ctx.env.AI_PROVIDER) break; // sem IA no servidor: as poses seguem esperando
+      queuePose(ctx, `${sheetId}:${sp.id}`.slice(0, 64), ctx.sender, sp);
+      ctx.db.sprite.id.update({ ...sp, status: 'generating', error: '' });
+    }
+  }
+);
+
+// Remove o charsheet: o personagem volta a "sem charsheet". As poses já enviadas ou geradas ficam;
+// as que esperavam pelo charsheet falham com NO_SHEET (dá para tentar de novo depois).
+export const remove_charsheet = spacetimedb.reducer(
+  { storyId: t.string(), characterId: t.string() },
+  (ctx, { storyId, characterId }) => {
+    requireRole(ctx, storyId, 'editor');
+    const c = ctx.db.character.id.find(characterId);
+    if (!c || c.storyId !== storyId) throw new SenderError('NOT_FOUND');
+    if (c.status === 'generating') throw new SenderError('BUSY');
+    for (const cs of [...ctx.db.charsheet.characterId.filter(characterId)]) ctx.db.charsheet.id.delete(cs.id);
+    ctx.db.character.id.update({ ...c, sheetId: '', status: '', error: '' });
+    for (const sp of [...ctx.db.sprite.characterId.filter(characterId)])
+      if (sp.status === 'pending') ctx.db.sprite.id.update({ ...sp, status: 'failed', error: 'NO_SHEET' });
+  }
+);
+
 export const generate_background = spacetimedb.reducer(
   { storyId: t.string(), backgroundId: t.string(), jobId: t.string(), name: t.string(), desc: t.string() },
   (ctx, { storyId, backgroundId, jobId, name, desc }) => {

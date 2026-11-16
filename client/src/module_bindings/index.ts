@@ -53,6 +53,7 @@ import PingReducer from "./ping_reducer";
 import PushChatChunkReducer from "./push_chat_chunk_reducer";
 import RegisterWorkerReducer from "./register_worker_reducer";
 import ReleaseFieldReducer from "./release_field_reducer";
+import RemoveCharsheetReducer from "./remove_charsheet_reducer";
 import RemoveMemberReducer from "./remove_member_reducer";
 import RenameStoryReducer from "./rename_story_reducer";
 import RenewFieldLockReducer from "./renew_field_lock_reducer";
@@ -64,6 +65,7 @@ import SetLinkAccessReducer from "./set_link_access_reducer";
 import SetProfileReducer from "./set_profile_reducer";
 import ShareStoryReducer from "./share_story_reducer";
 import UpdateCursorReducer from "./update_cursor_reducer";
+import UploadCharsheetReducer from "./upload_charsheet_reducer";
 
 // Import all procedure arg schemas
 import * as CompleteTextProcedure from "./complete_text_procedure";
@@ -336,6 +338,7 @@ const reducersSchema = __reducers(
   __reducerSchema("push_chat_chunk", PushChatChunkReducer),
   __reducerSchema("register_worker", RegisterWorkerReducer),
   __reducerSchema("release_field", ReleaseFieldReducer),
+  __reducerSchema("remove_charsheet", RemoveCharsheetReducer),
   __reducerSchema("remove_member", RemoveMemberReducer),
   __reducerSchema("rename_story", RenameStoryReducer),
   __reducerSchema("renew_field_lock", RenewFieldLockReducer),
@@ -347,6 +350,7 @@ const reducersSchema = __reducers(
   __reducerSchema("set_profile", SetProfileReducer),
   __reducerSchema("share_story", ShareStoryReducer),
   __reducerSchema("update_cursor", UpdateCursorReducer),
+  __reducerSchema("upload_charsheet", UploadCharsheetReducer),
 );
 
 /** The schema information for all procedures in this module. This is defined the same way as the procedures would have been defined in the server. */

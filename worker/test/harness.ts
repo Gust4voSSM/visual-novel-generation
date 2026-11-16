@@ -95,3 +95,48 @@ export async function proc<T = any>(p: Promise<string>): Promise<T> {
   if (r.error) throw new Error(r.error + (r.detail ? ' ' + r.detail : ''));
   return r;
 }
+
+// Elenco em tabelas: criação de personagem pelos mesmos caminhos do editor.
+export type PoseSpec = { id?: string; name: string; desc?: string };
+export type CreatedCharacter = { id: string; poses: { id: string; name: string; desc: string }[] };
+
+// Personagem com IA (generate_character): devolve já, com as linhas nascendo 'generating'/'pending'.
+// Com wait, espera o charsheet e todas as poses terem imagem (ou falharem → erro).
+export async function createCharacter(
+  c: Client,
+  opts: { name: string; desc?: string; color?: string; poses?: PoseSpec[]; storyId?: string; wait?: boolean; timeoutMs?: number },
+): Promise<CreatedCharacter> {
+  const storyId = opts.storyId ?? T.story, id = uid('c');
+  const poses = (opts.poses ?? [{ name: 'Neutro', desc: 'calma' }]).map(p => ({ id: p.id ?? uid('sp'), name: p.name, desc: p.desc ?? '' }));
+  await c.conn.reducers.generateCharacter({
+    storyId, characterId: id, jobId: uid('j'), name: opts.name, desc: opts.desc ?? '', color: opts.color ?? '', poses: JSON.stringify(poses),
+  });
+  if (opts.wait) await waitCharacterReady(c, id, opts.timeoutMs);
+  return { id, poses };
+}
+
+// Espera o personagem sair de 'generating' e as poses terem imagem; falha se algo der 'failed'.
+export async function waitCharacterReady(c: Client, id: string, timeoutMs = 20_000) {
+  return waitFor('personagem pronto ' + id, () => {
+    const ch = c.conn.db.curCharacter.id.find(id);
+    const sps = [...c.conn.db.curSprite.iter()].filter(s => s.characterId === id);
+    const bad = [ch, ...sps].find(r => r?.status === 'failed');
+    if (bad) throw new Error('geração falhou: ' + bad.error);
+    return ch && ch.status === '' && ch.sheetId && sps.every(s => s.imageKey) ? ch : null;
+  }, timeoutMs);
+}
+
+// Personagem manual (sem IA): upsert_character + sprites com imagens já enviadas (links do app).
+export async function createManualCharacter(
+  c: Client,
+  opts: { name: string; desc?: string; sprites?: { id?: string; name: string; imageKey: string }[]; storyId?: string },
+): Promise<{ id: string; sprites: string[] }> {
+  const storyId = opts.storyId ?? T.story, id = uid('c');
+  const sprites = (opts.sprites ?? []).map(s => ({ ...s, id: s.id ?? uid('sp') }));
+  await c.conn.reducers.applyOperations({ storyId, ops: JSON.stringify([
+    { op: 'upsert_character', character: { id, name: opts.name, desc: opts.desc ?? '' } },
+    ...sprites.map(s => ({ op: 'upsert_sprite', sprite: { id: s.id, characterId: id, name: s.name, imageKey: s.imageKey } })),
+  ]) });
+  await waitFor('personagem ' + id, () => c.conn.db.curCharacter.id.find(id));
+  return { id, sprites: sprites.map(s => s.id) };
+}

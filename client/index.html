@@ -117,6 +117,30 @@ select.inp{padding:0 6px}
 .sprite .inp{height:26px;font-size:12px}
 .artgen{display:flex;align-items:center;justify-content:center;background:var(--surface-2);border-radius:5px;color:#ffb4a8;font-weight:700}
 .sprite .artgen{width:52px;height:68px}
+/* ---------- editor de personagem (sobre o canvas, não modal) ---------- */
+.card.sel{box-shadow:inset 0 0 0 1px var(--line-3),inset 3px 0 0 #f2a541}
+.ched{position:absolute;top:68px;left:16px;right:16px;bottom:16px;z-index:8;max-width:980px;margin:0 auto;background:#16171a;border-radius:14px;box-shadow:0 0 0 1px var(--line-3),0 24px 60px rgba(0,0,0,.55);display:flex;flex-direction:column;overflow:hidden;user-select:text;-webkit-user-select:text}
+.ched[hidden]{display:none}
+.ched>.card{display:contents}
+.ched-head{display:flex;align-items:center;gap:10px;padding:12px 14px 12px 18px;border-bottom:1px solid var(--line-2)}
+.ched-head h2{margin:0;font-size:16px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ched-head .iconbtn{margin-left:auto}
+.ched-body{flex:1;min-height:0;overflow:auto;display:grid;grid-template-columns:minmax(260px,1fr) minmax(300px,1.25fr);gap:22px;padding:16px 18px 22px;align-items:start}
+.ched-col{display:flex;flex-direction:column;gap:12px;min-width:0}
+.ched .sheet{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.ched .sheet figure{margin:0;background:var(--well);border-radius:8px;box-shadow:inset 0 0 0 1px var(--line);padding:6px;display:flex;flex-direction:column;align-items:center;gap:4px}
+.ched .sheet img{width:100%;height:clamp(180px,34cqh,340px);object-fit:contain;object-position:bottom}
+.ched .sheet figcaption{font-family:var(--mono);font-size:11px;color:#83858c}
+.ched .empty-sheet{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;min-height:140px;background:var(--well);border-radius:8px;box-shadow:inset 0 0 0 1px var(--line);color:#83858c;font-size:12.5px;padding:12px;text-align:center}
+.ched .sprites{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:8px;margin-top:8px}
+.ched .addbtn.off{opacity:.55;position:relative}
+.ched .addbtn.off .tip{position:absolute;left:50%;bottom:calc(100% + 8px);transform:translateX(-50%);white-space:nowrap;background:#2a2b31;color:var(--text);font-size:12px;padding:6px 9px;border-radius:7px;box-shadow:0 6px 18px rgba(0,0,0,.45);opacity:0;pointer-events:none;transition:opacity .12s}
+.ched .addbtn.off:hover .tip,.ched .addbtn.off:focus-visible .tip{opacity:1}
+.ched .addbtn.nudge{animation:nudge .9s ease-out}
+@keyframes nudge{0%,100%{box-shadow:0 0 0 0 rgba(167,139,250,0)}30%{box-shadow:0 0 0 4px rgba(167,139,250,.55)}}
+.ched .sprite{grid-template-columns:84px 1fr auto}
+.ched .sprite img,.ched .sprite .artgen{width:84px;height:112px}
+@container (max-width:720px){.ched-body{grid-template-columns:1fr}.ched{top:64px;left:8px;right:8px;bottom:8px}}
 .avatar.artgen,.bg-thumb.artgen{flex:none}
 .artgen.failed{background:#3a1f22}
 .genline{display:flex;align-items:center;gap:6px;flex-wrap:wrap;font-size:11.5px;color:var(--text-2)}
@@ -593,6 +617,7 @@ body.chardrag,body.chardrag *{cursor:grabbing!important;user-select:none}
       </div>
     </div>
     <div class="wash" id="wash"></div>
+    <div class="ched" id="charEd" role="region" aria-label="Editor de personagem" hidden></div>
     <!-- Topo em três zonas: onde estou (título, salvamento) · o grafo · pessoas e ações. -->
     <div class="hud">
       <div class="hz hz-left">

@@ -3,7 +3,7 @@
 // publicado sem AI_PROVIDER, para conferir AI_DISABLED.
 import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { CONTEXT, EDITOR_QUERIES, connect, errCode, proc, seedStory, addEditor, sleep, uid, waitFor, type Client, T } from './harness';
+import { CONTEXT, EDITOR_QUERIES, connect, errCode, proc, seedStory, addEditor, createCharacter, sleep, uid, waitFor, type Client, T } from './harness';
 
 const PLACEHOLDERS = fileURLToPath(new URL('../../client/public/', import.meta.url));
 let pass = 0, fail = 0;
@@ -160,8 +160,7 @@ await test('background com falha do provedor → failed', async () => {
 console.log('\nelenco em tabelas (geração sem bloquear, imagens como links)');
 const spriteRow = (c: Client, id: string) => c.conn.db.curSprite.id.find(id);
 await test('generate_character: personagem e poses aparecem já; charsheet e depois uma pose por pedido', async () => {
-  const cid = uid('c'), poses = [{ id: uid('sp'), name: 'Neutro', desc: 'calma' }, { id: uid('sp'), name: 'Feliz', desc: 'sorriso' }];
-  await B.conn.reducers.generateCharacter({ storyId: T.story, characterId: cid, jobId: uid('j'), name: 'Rita', desc: 'cabelo curto', color: '', poses: JSON.stringify(poses) });
+  const { id: cid, poses } = await createCharacter(B, { name: 'Rita', desc: 'cabelo curto', poses: [{ name: 'Neutro', desc: 'calma' }, { name: 'Feliz', desc: 'sorriso' }] });
   const c0 = B.conn.db.curCharacter.id.find(cid);
   assert(c0?.status === 'generating' && spriteRow(B, poses[0].id)?.status === 'pending', 'linhas não nasceram gerando');
   await waitFor('poses prontas', () => poses.every(p => spriteRow(B, p.id)?.imageKey) ? true : null, 20_000);
@@ -177,8 +176,7 @@ await test('generate_character: personagem e poses aparecem já; charsheet e dep
   assert(spriteRow(B, sp)!.position === 2, 'posição da pose nova');
 });
 await test('pose falhada fica na tabela; tentar de novo gera', async () => {
-  const cid = uid('c'), sp = uid('sp');
-  await B.conn.reducers.generateCharacter({ storyId: T.story, characterId: cid, jobId: uid('j'), name: 'Caio', desc: 'barba', color: '', poses: JSON.stringify([{ id: sp, name: 'Bravo', desc: '#falha' }]) });
+  const { poses: [{ id: sp }] } = await createCharacter(B, { name: 'Caio', desc: 'barba', poses: [{ name: 'Bravo', desc: '#falha' }] });
   await waitFor('pose falhou', () => spriteRow(B, sp)?.status === 'failed' ? true : null, 20_000);
   assert(spriteRow(B, sp)!.error === 'AI_PROVIDER_ERROR', spriteRow(B, sp)!.error);
   await B.conn.reducers.applyOperations({ storyId: T.story, ops: JSON.stringify([{ op: 'upsert_sprite', sprite: { id: sp, desc: 'sobrancelhas franzidas' } }]) });

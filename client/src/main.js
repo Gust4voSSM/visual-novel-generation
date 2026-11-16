@@ -1918,7 +1918,7 @@ canvas.addEventListener('contextmenu', (e) => {
   if (!e.target.closest('input,textarea')) e.preventDefault();
 });
 canvas.addEventListener('pointerdown', (e) => {
-  if (e.target.closest('.hud,.hudpop,.zoombar,.selbar,.warnpop,.menu,.cutbtn')) return;
+  if (e.target.closest('.hud,.ched,.hudpop,.zoombar,.selbar,.warnpop,.menu,.cutbtn')) return;
   closeMenu();
   $('#warnHost').innerHTML = '';
   const touch = e.pointerType === 'touch';
@@ -2365,6 +2365,7 @@ canvas.addEventListener(
   'wheel',
   (e) => {
     const t = e.target;
+    if (t && t.closest && t.closest('.ched')) return;
     if (t && t.tagName === 'TEXTAREA' && t.scrollHeight > t.clientHeight) return;
     e.preventDefault();
     zoomAt(view.z * Math.exp(-e.deltaY * (e.ctrlKey ? 0.01 : 0.0015)), e.clientX, e.clientY);
@@ -2681,13 +2682,63 @@ function spriteRow(s) {
 // Com IA: pose nova a partir do charsheet; sem charsheet (personagem enviado), gera o charsheet antes.
 function poseButtons(c) {
   const up = `<label class="addbtn" style="display:inline-flex;align-items:center">+ pose (upload)<input type="file" accept="image/png,image/jpeg,image/webp" data-upsprite hidden></label>`;
+  // Sem charsheet o botão continua visível: explica o que falta e leva até a caixa do charsheet.
   const ai =
     c.sheetId || c.status === 'generating'
-      ? `<button class="addbtn ai" data-aipose>${SPARK13()}+ pose com IA</button>`
-      : c.status === 'failed'
-        ? ''
-        : `<button class="addbtn ai" data-gensheet title="Front e side do personagem, gerados a partir da descrição. As poses com IA usam esse charsheet.">${SPARK13()}gerar charsheet com IA</button>`;
+      ? `<button class="addbtn ai" data-aipose>${SPARK13()}gerar pose com IA</button>`
+      : `<button class="addbtn ai off" data-needsheet aria-describedby="needSheetTip">${SPARK13()}gerar pose com IA<span class="tip" id="needSheetTip" role="tooltip">Adicione um charsheet para gerar com IA</span></button>`;
   return `<div class="row" style="flex-wrap:wrap">${up}${ai}</div>`;
+}
+// Editor de personagem: painel sobre o canvas (não modal; os painéis laterais seguem livres).
+let editChar = null;
+const charEd = $('#charEd');
+function sheetOf(c) {
+  try {
+    return c.sheetId && conn ? conn.db.curCharsheet.id.find(c.sheetId) : null;
+  } catch (_) {
+    return null;
+  }
+}
+// Envio do charsheet: 1 imagem (vale para frente e perfil) ou 2 (frente, depois perfil).
+const sheetUpload = (label) =>
+  `<label class="addbtn" style="display:inline-flex;align-items:center" title="Uma imagem (frente) ou duas (frente e perfil)">${label}<input type="file" accept="image/png,image/jpeg,image/webp" multiple data-upsheet hidden></label>`;
+function sheetHTML(c) {
+  const sh = sheetOf(c);
+  if (sh)
+    return `<div class="sheet">${[
+      ['frente', sh.front],
+      ['perfil', sh.side],
+    ]
+      .map(
+        ([l, k]) =>
+          `<figure><img src="${esc(imgUrl(k))}" alt="${esc(c.name)}: ${l}"><figcaption>${l}</figcaption></figure>`,
+      )
+      .join(
+        '',
+      )}</div><div class="row">${sheetUpload('trocar charsheet')}<button class="addbtn" data-rmsheet>remover charsheet</button></div>`;
+  if (c.status === 'generating')
+    return '<div class="sheet empty-sheet"><span class="spinner"></span>gerando o charsheet…</div>';
+  return `<div class="sheet empty-sheet"><span>${c.status === 'failed' ? 'O charsheet falhou. Gere de novo ou envie o seu.' : 'Sem charsheet. As poses com IA são geradas a partir dele.'}</span><div class="row" style="justify-content:center;flex-wrap:wrap"><button class="addbtn ai" data-gensheet title="Frente e perfil do personagem, gerados a partir da descrição.">${SPARK13()}gerar charsheet com IA</button>${sheetUpload('enviar charsheet')}</div></div>`;
+}
+function renderCharEd() {
+  const c = editChar && charById(editChar);
+  if (!c) {
+    editChar = null;
+    charEd.hidden = true;
+    charEd.innerHTML = '';
+    return;
+  }
+  const keep = charEd.querySelector('.ched-body')?.scrollTop || 0;
+  charEd.hidden = false;
+  charEd.innerHTML = `<div class="card" data-c="${c.id}"><div class="ched-head"><span class="swatch" style="background:${c.color || 'transparent'}"></span><h2 style="color:${c.color || 'inherit'}">${esc(c.name)}</h2><span class="card-sub">${charSub(c)}</span><button class="iconbtn" data-edclose aria-label="Fechar editor">${X}</button></div>
+  <div class="ched-body"><div class="ched-col">${genLine(c, 'o charsheet', 'c:' + c.id)}<div class="field"><span class="lbl">charsheet</span>${sheetHTML(c)}</div>
+    <label class="field"><span class="lbl">nome</span><input class="inp" data-cf="name" value="${esc(c.name)}"></label>
+    <div class="field"><span class="lbl">cor do nome · opcional</span><div class="row"><label class="row" style="gap:6px;font-size:12.5px;color:var(--text-2)"><input type="checkbox" data-cf="hascolor"${c.color ? ' checked' : ''}> usar cor</label><input type="color" data-cf="color" value="${c.color || '#f2a541'}"${c.color ? '' : ' disabled'} aria-label="Cor" style="width:34px;height:24px;border:0;background:none;padding:0"></div></div>
+    <label class="field"><span class="lbl">descrição</span><textarea class="inp" data-cf="desc" rows="6">${esc(c.desc)}</textarea></label>
+    <div class="row"><button class="btn sm" data-pub>Publicar no marketplace</button><button class="btn sm danger" data-cdel>Excluir</button></div></div>
+  <div class="ched-col"><div class="field"><span class="lbl">sprites · emoções</span>${poseButtons(c)}<div class="sprites">${c.sprites.map(spriteRow).join('') || '<div class="empty">Sem sprites. Envie ao menos um para usar este personagem em cenas.</div>'}</div></div></div></div></div>`;
+  const b = charEd.querySelector('.ched-body');
+  if (b) b.scrollTop = keep;
 }
 function renderRail() {
   railDirty = false;
@@ -2702,19 +2753,9 @@ function renderRail() {
     body.innerHTML = state.characters.length
       ? state.characters
           .map((c) => {
-            const o = openCards.has(c.id);
+            const o = editChar === c.id;
             const av = readySprites(c)[0];
-            return `<div class="card${cardFresh(c.id, c.source)}" data-c="${c.id}"><div class="card-row" data-toggle>${av ? `<img class="avatar" src="${esc(av.img)}" alt="">` : c.status === 'failed' ? artOf({ status: 'failed', error: c.error }, 'avatar') : busy(c) || c.sprites.some(busy) ? artOf({ status: 'generating' }, 'avatar') : '<span class="avatar" title="Sem sprites"></span>'}<div style="min-width:0;flex:1"><div class="card-name"><span class="swatch" style="background:${c.color || 'transparent'}"></span><span style="color:${c.color || 'inherit'}">${esc(c.name)}</span></div><div class="card-sub">${charSub(c)}</div></div><span class="chev">${o ? '−' : '+'}</span></div>
-      ${
-        o
-          ? `<div class="card-edit">${genLine(c, 'o charsheet', 'c:' + c.id)}<label class="field"><span class="lbl">nome</span><input class="inp" data-cf="name" value="${esc(c.name)}"></label>
-      <div class="field"><span class="lbl">cor do nome · opcional</span><div class="row"><label class="row" style="gap:6px;font-size:12.5px;color:var(--text-2)"><input type="checkbox" data-cf="hascolor"${c.color ? ' checked' : ''}> usar cor</label><input type="color" data-cf="color" value="${c.color || '#f2a541'}"${c.color ? '' : ' disabled'} aria-label="Cor" style="width:34px;height:24px;border:0;background:none;padding:0"><span style="font-weight:600;color:${c.color || 'var(--text)'}">${esc(c.name)}</span></div></div>
-      <label class="field"><span class="lbl">descrição</span><textarea class="inp" data-cf="desc">${esc(c.desc)}</textarea></label>
-      <div class="field"><span class="lbl">sprites · emoções</span>${c.sprites.map(spriteRow).join('') || '<div class="empty">Sem sprites. Envie ao menos um para usar este personagem em cenas.</div>'}
-      ${poseButtons(c)}</div>
-      <div class="row"><button class="btn sm" data-pub>Publicar no marketplace</button><button class="btn sm danger" data-cdel>Excluir</button></div></div>`
-          : ''
-      }</div>`;
+            return `<div class="card${o ? ' sel' : ''}${cardFresh(c.id, c.source)}" data-c="${c.id}"><div class="card-row" data-toggle>${av ? `<img class="avatar" src="${esc(av.img)}" alt="">` : c.status === 'failed' ? artOf({ status: 'failed', error: c.error }, 'avatar') : busy(c) || c.sprites.some(busy) ? artOf({ status: 'generating' }, 'avatar') : '<span class="avatar" title="Sem sprites"></span>'}<div style="min-width:0;flex:1"><div class="card-name"><span class="swatch" style="background:${c.color || 'transparent'}"></span><span style="color:${c.color || 'inherit'}">${esc(c.name)}</span></div><div class="card-sub">${charSub(c)}</div></div><span class="chev">${o ? '›' : '+'}</span></div></div>`;
           })
           .join('')
       : '<div class="empty">Nenhum personagem. Envie sprites, gere com IA ou copie do Marketplace.</div>';
@@ -2732,7 +2773,7 @@ function renderRail() {
         sprites: [],
       };
       state.characters.push(c);
-      openCards.add(c.id);
+      editChar = c.id;
       freshCards.set(c.id, performance.now());
       renderRail();
       refresh();
@@ -2775,6 +2816,7 @@ function renderRail() {
     $('#genBg').onclick = genBgModal;
     $('#mkBg').onclick = () => marketModal('bgs');
   }
+  renderCharEd();
 }
 // Atualização vinda do servidor com alguém digitando no painel: redesenha quando o campo perde o foco.
 let railDirty = false;
@@ -2782,7 +2824,7 @@ function renderRailSoon() {
   const a = document.activeElement;
   if (
     a &&
-    railBody.contains(a) &&
+    (railBody.contains(a) || charEd.contains(a)) &&
     a.matches('input:not([type=checkbox]):not([type=file]):not([type=color]),textarea')
   ) {
     railDirty = true;
@@ -2856,17 +2898,29 @@ function askPose(c) {
   });
 }
 const railBody = $('#railBody');
-railBody.addEventListener('focusout', () =>
+// Os mesmos handlers servem o painel e o editor de personagem.
+const onCast = (ev, fn) => [railBody, charEd].forEach((el) => el.addEventListener(ev, fn));
+onCast('focusout', () =>
   setTimeout(() => {
     if (railDirty) renderRailSoon();
   }, 0),
 );
-railBody.addEventListener('click', (e) => {
+onCast('click', (e) => {
   const card = e.target.closest('.card');
   if (!card) return;
   const cid = card.dataset.c,
     bid = card.dataset.b;
+  if (e.target.closest('[data-edclose]')) {
+    editChar = null;
+    renderRail();
+    return;
+  }
   if (e.target.closest('[data-toggle]')) {
+    if (cid) {
+      editChar = editChar === cid ? null : cid;
+      renderRail();
+      return;
+    }
     const k = cid || bid;
     openCards.has(k) ? openCards.delete(k) : openCards.add(k);
     renderRail();
@@ -2885,6 +2939,7 @@ railBody.addEventListener('click', (e) => {
       }
       pushUndo();
       state.characters = state.characters.filter((x) => x.id !== cid);
+      if (editChar === cid) editChar = null;
       renderRail();
       refresh();
       toast('Personagem excluído');
@@ -2903,7 +2958,28 @@ railBody.addEventListener('click', (e) => {
       renderRail();
       refresh();
     } else if (e.target.closest('[data-aipose]')) askPose(c);
-    else if (e.target.closest('[data-gensheet]'))
+    else if (e.target.closest('[data-rmsheet]'))
+      askConfirm({
+        title: 'Remover charsheet',
+        text: `O charsheet de ${esc(c.name)} será apagado. As poses que já existem continuam; para gerar novas com IA, será preciso outro charsheet.`,
+        ok: 'Remover',
+        danger: true,
+      }).then((yes) => {
+        if (yes)
+          conn.reducers
+            .removeCharsheet({ storyId, characterId: c.id })
+            .then(() => toast('Charsheet removido'), castFailed('remover o charsheet'));
+      });
+    else if (e.target.closest('[data-needsheet]')) {
+      const g = charEd.querySelector('[data-gensheet]');
+      if (g) {
+        g.scrollIntoView({ block: 'center', behavior: 'smooth' });
+        g.focus({ preventScroll: true });
+        g.classList.remove('nudge');
+        void g.offsetWidth;
+        g.classList.add('nudge');
+      }
+    } else if (e.target.closest('[data-gensheet]'))
       conn.reducers
         .retryGeneration({ storyId, target: 'character', id: c.id, jobId: uid('j') })
         .catch(castFailed('gerar o charsheet'));
@@ -2932,11 +3008,11 @@ railBody.addEventListener('click', (e) => {
     else if (e.target.closest('[data-pub]')) publish('bgs', b);
   }
 });
-railBody.addEventListener('focusin', (e) => {
+onCast('focusin', (e) => {
   if (e.target.matches('input:not([type=checkbox]):not([type=file]),textarea'))
     pendingSnap = snapStr();
 });
-railBody.addEventListener('input', (e) => {
+onCast('input', (e) => {
   const card = e.target.closest('.card');
   if (!card) return;
   const t = e.target;
@@ -2952,7 +3028,7 @@ railBody.addEventListener('input', (e) => {
   }
   syncSoon();
 });
-railBody.addEventListener('change', (e) => {
+onCast('change', (e) => {
   const card = e.target.closest('.card');
   if (!card) return;
   const t = e.target;
@@ -2962,6 +3038,25 @@ railBody.addEventListener('change', (e) => {
     c.color = t.checked ? card.querySelector('[data-cf=color]').value || '#f2a541' : '';
     renderRail();
     refresh();
+    return;
+  }
+  if (t.matches('[data-upsheet]')) {
+    const cid = card.dataset.c;
+    const files = [...t.files].slice(0, 2);
+    if (!files.length) return;
+    Promise.all(files.map(uploadImage)).then(
+      ([front, side]) =>
+        conn.reducers
+          .uploadCharsheet({
+            storyId,
+            characterId: cid,
+            sheetId: uid('cs'),
+            front,
+            side: side || front,
+          })
+          .then(() => toast('Charsheet enviado'), castFailed('enviar o charsheet')),
+      uploadFailed,
+    );
     return;
   }
   if (t.matches('[data-upsprite]')) {
@@ -3656,7 +3751,7 @@ function genCharModal() {
         () => {
           if (w.isConnected) closeModal();
           railTab = 'chars';
-          openCards.add(characterId);
+          editChar = characterId;
           freshCards.set(characterId, performance.now());
           renderRail();
           toast(
@@ -5614,7 +5709,12 @@ document.addEventListener('pointerdown', (e) => {
   if (!e.target.closest('#hudPop,[data-pop]')) closeHudPop();
 });
 document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape') closeHudPop();
+  if (e.key !== 'Escape') return;
+  closeHudPop();
+  if (editChar && !document.querySelector('.modal')) {
+    editChar = null;
+    renderRail();
+  }
 });
 // ⋯: ações raras e destrutivas, fora da barra (só o dono vê o botão).
 $('#btnMore').onclick = (e) => {
@@ -5892,6 +5992,7 @@ function leaveStory(close = true) {
   state.characters = [];
   state.backgrounds = [];
   openCards.clear();
+  editChar = null;
   closeModal();
   closeHudPop();
   resetChat();
@@ -6363,6 +6464,8 @@ function connect() {
         else if (o.status === 'generating' && !r.status && r.imageKey)
           freshSprites.set(r.id, performance.now());
       });
+      c.db.curCharsheet.onInsert(() => renderRailSoon());
+      c.db.curCharsheet.onUpdate(() => renderRailSoon());
       c.db.curCharacter.onUpdate((_c, o, r) => {
         if (!viewsMine()) return;
         if (o.status === 'generating' && r.status === 'failed')
@@ -6457,6 +6560,7 @@ function connect() {
           'SELECT * FROM cur_presence',
           'SELECT * FROM cur_locks',
           'SELECT * FROM cur_character',
+          'SELECT * FROM cur_charsheet',
           'SELECT * FROM cur_sprite',
           'SELECT * FROM cur_background',
           'SELECT * FROM cur_member',
