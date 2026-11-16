@@ -287,6 +287,9 @@ const background = table(
     status: t.string(), // '' | 'generating' | 'failed'
     error: t.string(),
     createdAt: t.timestamp(),
+    // Prompt da imagem gerada, JSON {scene, time, mood}: o do agente do chat, ou o que a melhoria escreveu.
+    // '' em upload, marketplace, ou depois que o autor muda a descrição ou a imagem. Regenerar reaproveita.
+    prompt: t.string().default(''),
   }
 );
 
@@ -573,12 +576,12 @@ function applyOp(ctx: Ctx, storyId: string, o: Op, i: number) {
       if ('imageKey' in v && !imageKeyOk(v.imageKey)) fail('INVALID', i, v.id);
       if ('source' in v && !CAST_SOURCES.has(String(v.source))) fail('INVALID', i, v.id);
       const row = cur ? { ...cur } : {
-        id: v.id, storyId, name: 'Background', desc: '', imageKey: '', baseKey: '', source: 'upload', status: '', error: '', createdAt: ctx.timestamp,
+        id: v.id, storyId, name: 'Background', desc: '', imageKey: '', baseKey: '', source: 'upload', status: '', error: '', createdAt: ctx.timestamp, prompt: '',
       };
       if ('name' in v) row.name = str(v.name, 80);
-      if ('desc' in v) row.desc = str(v.desc, 2000);
+      if ('desc' in v && str(v.desc, 2000) !== row.desc) Object.assign(row, { desc: str(v.desc, 2000), prompt: '' });
       if ('source' in v) row.source = String(v.source);
-      if ('imageKey' in v && v.imageKey !== row.imageKey) Object.assign(row, { imageKey: String(v.imageKey), baseKey: '', status: '', error: '' });
+      if ('imageKey' in v && v.imageKey !== row.imageKey) Object.assign(row, { imageKey: String(v.imageKey), baseKey: '', status: '', error: '', prompt: '' });
       if (cur) ctx.db.background.id.update(row);
       else ctx.db.background.insert(row);
       break;
@@ -1309,12 +1312,43 @@ export const generate_background = spacetimedb.reducer(
     checkRate(ctx);
     const b = {
       id: backgroundId, storyId, name: str(name, 80), desc: str(desc, 2000), imageKey: '', baseKey: '', source: 'ai',
-      status: 'generating', error: '', createdAt: ctx.timestamp,
+      status: 'generating', error: '', createdAt: ctx.timestamp, prompt: '',
     };
     ctx.db.background.insert(b);
     insertJob(ctx, jobId, ctx.sender, storyId, 'background', { backgroundId, name: b.name, desc: b.desc });
   }
 );
+
+// Background pedido pelo agente do chat (proposta aceita): o prompt já vem escrito, o worker não o melhora.
+export const generate_background_prompted = spacetimedb.reducer(
+  { storyId: t.string(), backgroundId: t.string(), jobId: t.string(), name: t.string(), desc: t.string(), prompt: t.string(), time: t.string(), mood: t.string() },
+  (ctx, { storyId, backgroundId, jobId, name, desc, prompt, time, mood }) => {
+    editorFor(ctx, storyId);
+    if (!validId(backgroundId) || !validId(jobId) || !name.trim() || !prompt.trim()) throw new SenderError('INVALID');
+    const cur = ctx.db.background.id.find(backgroundId);
+    if (cur) {
+      if (cur.storyId === storyId && ctx.db.aiJob.id.find(jobId)) return;
+      throw new SenderError('INVALID');
+    }
+    checkRate(ctx);
+    const brief = { scene: str(prompt, 1200), time: str(time, 20), mood: str(mood, 120) };
+    const b = {
+      id: backgroundId, storyId, name: str(name, 80), desc: str(desc, 2000), imageKey: '', baseKey: '', source: 'ai',
+      status: 'generating', error: '', createdAt: ctx.timestamp, prompt: JSON.stringify(brief),
+    };
+    ctx.db.background.insert(b);
+    insertJob(ctx, jobId, ctx.sender, storyId, 'background', { backgroundId, name: b.name, desc: b.desc, prompt: brief.scene, time: brief.time, mood: brief.mood });
+  }
+);
+
+type Brief = { scene: string; time: string; mood: string };
+function briefOf(json: string): Brief | null {
+  try {
+    const v = JSON.parse(json || 'null');
+    const scene = str(String(v?.scene ?? ''), 1200).trim();
+    return scene ? { scene, time: str(String(v.time ?? ''), 20), mood: str(String(v.mood ?? ''), 120) } : null;
+  } catch { return null; }
+}
 
 // Gera de novo: um charsheet (personagem falhado, ou enviado sem charsheet), uma pose ou um background.
 export const retry_generation = spacetimedb.reducer(
@@ -1348,7 +1382,11 @@ export const retry_generation = spacetimedb.reducer(
       if (b.status === 'generating') throw new SenderError('BUSY');
       checkRate(ctx);
       ctx.db.background.id.update({ ...b, status: 'generating', error: '' });
-      insertJob(ctx, jobId, ctx.sender, storyId, 'background', { backgroundId: id, name: b.name, desc: b.desc });
+      // Com prompt guardado, a imagem nova sai do mesmo prompt (sem passar de novo pela melhoria).
+      const brief = briefOf(b.prompt);
+      insertJob(ctx, jobId, ctx.sender, storyId, 'background', {
+        backgroundId: id, name: b.name, desc: b.desc, ...(brief ? { prompt: brief.scene, time: brief.time, mood: brief.mood } : {}),
+      });
     } else throw new SenderError('INVALID');
   }
 );
@@ -1397,7 +1435,12 @@ function onCastJob(ctx: Ctx, j: { id: string; kind: string; input: string; reque
       ctx.db.background.id.update({ ...b, status: 'failed', error: error || 'AI_INVALID_OUTPUT' });
       return;
     }
-    ctx.db.background.id.update({ ...b, imageKey: r.image_key, baseKey: imageKeyOk(r.base_key) ? String(r.base_key ?? '') : '', status: '', error: '' });
+    // O worker devolve o prompt usado (o do agente ou o melhorado); fica guardado para regenerar e para o chat.
+    const used = r.prompt && typeof r.prompt === 'object' ? briefOf(JSON.stringify(r.prompt)) : null;
+    ctx.db.background.id.update({
+      ...b, imageKey: r.image_key, baseKey: imageKeyOk(r.base_key) ? String(r.base_key ?? '') : '', status: '', error: '',
+      ...(used ? { prompt: JSON.stringify(used) } : {}),
+    });
   }
 }
 

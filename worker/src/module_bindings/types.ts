@@ -58,6 +58,7 @@ export const Background = __t.object("Background", {
   status: __t.string(),
   error: __t.string(),
   createdAt: __t.timestamp(),
+  prompt: __t.string(),
 });
 export type Background = __Infer<typeof Background>;
 

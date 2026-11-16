@@ -45,6 +45,7 @@ import CreateStoryReducer from "./create_story_reducer";
 import DeleteStoryReducer from "./delete_story_reducer";
 import FailJobReducer from "./fail_job_reducer";
 import GenerateBackgroundReducer from "./generate_background_reducer";
+import GenerateBackgroundPromptedReducer from "./generate_background_prompted_reducer";
 import GenerateCharacterReducer from "./generate_character_reducer";
 import JoinByLinkReducer from "./join_by_link_reducer";
 import LockFieldReducer from "./lock_field_reducer";
@@ -330,6 +331,7 @@ const reducersSchema = __reducers(
   __reducerSchema("delete_story", DeleteStoryReducer),
   __reducerSchema("fail_job", FailJobReducer),
   __reducerSchema("generate_background", GenerateBackgroundReducer),
+  __reducerSchema("generate_background_prompted", GenerateBackgroundPromptedReducer),
   __reducerSchema("generate_character", GenerateCharacterReducer),
   __reducerSchema("join_by_link", JoinByLinkReducer),
   __reducerSchema("lock_field", LockFieldReducer),
