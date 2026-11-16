@@ -2657,10 +2657,11 @@ function spriteRow(s) {
 // Com IA: pose nova a partir do charsheet; sem charsheet (personagem enviado), gera o charsheet antes.
 function poseButtons(c) {
   const up = `<label class="addbtn" style="display:inline-flex;align-items:center">+ pose (upload)<input type="file" accept="image/png,image/jpeg,image/webp" data-upsprite hidden></label>`;
+  // Sem charsheet o botão continua visível: explica o que falta e leva até a caixa do charsheet.
   const ai =
     c.sheetId || c.status === 'generating'
-      ? `<button class="addbtn ai" data-aipose>${SPARK13()}+ pose com IA</button>`
-      : ''; // sem charsheet: o botão de gerar fica na caixa do charsheet
+      ? `<button class="addbtn ai" data-aipose>${SPARK13()}gerar pose com IA</button>`
+      : `<button class="addbtn ai off" data-needsheet aria-describedby="needSheetTip">${SPARK13()}gerar pose com IA<span class="tip" id="needSheetTip" role="tooltip">Adicione um charsheet para gerar com IA</span></button>`;
   return `<div class="row" style="flex-wrap:wrap">${up}${ai}</div>`;
 }
 // Editor de personagem: painel sobre o canvas (não modal; os painéis laterais seguem livres).
@@ -2673,6 +2674,9 @@ function sheetOf(c) {
     return null;
   }
 }
+// Envio do charsheet: 1 imagem (vale para frente e perfil) ou 2 (frente, depois perfil).
+const sheetUpload = (label) =>
+  `<label class="addbtn" style="display:inline-flex;align-items:center" title="Uma imagem (frente) ou duas (frente e perfil)">${label}<input type="file" accept="image/png,image/jpeg,image/webp" multiple data-upsheet hidden></label>`;
 function sheetHTML(c) {
   const sh = sheetOf(c);
   if (sh)
@@ -2684,11 +2688,10 @@ function sheetHTML(c) {
         ([l, k]) =>
           `<figure><img src="${esc(imgUrl(k))}" alt="${esc(c.name)}: ${l}"><figcaption>${l}</figcaption></figure>`,
       )
-      .join('')}</div>`;
+      .join('')}</div><div class="row">${sheetUpload('trocar charsheet')}</div>`;
   if (c.status === 'generating')
     return '<div class="sheet empty-sheet"><span class="spinner"></span>gerando o charsheet…</div>';
-  if (c.status === 'failed') return '<div class="sheet empty-sheet">O charsheet falhou.</div>';
-  return `<div class="sheet empty-sheet"><span>Sem charsheet. As poses com IA são geradas a partir dele.</span><button class="addbtn ai" data-gensheet title="Front e side do personagem, gerados a partir da descrição.">${SPARK13()}gerar charsheet com IA</button></div>`;
+  return `<div class="sheet empty-sheet"><span>${c.status === 'failed' ? 'O charsheet falhou. Gere de novo ou envie o seu.' : 'Sem charsheet. As poses com IA são geradas a partir dele.'}</span><div class="row" style="justify-content:center;flex-wrap:wrap"><button class="addbtn ai" data-gensheet title="Frente e perfil do personagem, gerados a partir da descrição.">${SPARK13()}gerar charsheet com IA</button>${sheetUpload('enviar charsheet')}</div></div>`;
 }
 function renderCharEd() {
   const c = editChar && charById(editChar);
@@ -2928,7 +2931,16 @@ onCast('click', (e) => {
       renderRail();
       refresh();
     } else if (e.target.closest('[data-aipose]')) askPose(c);
-    else if (e.target.closest('[data-gensheet]'))
+    else if (e.target.closest('[data-needsheet]')) {
+      const g = charEd.querySelector('[data-gensheet]');
+      if (g) {
+        g.scrollIntoView({ block: 'center', behavior: 'smooth' });
+        g.focus({ preventScroll: true });
+        g.classList.remove('nudge');
+        void g.offsetWidth;
+        g.classList.add('nudge');
+      }
+    } else if (e.target.closest('[data-gensheet]'))
       conn.reducers
         .retryGeneration({ storyId, target: 'character', id: c.id, jobId: uid('j') })
         .catch(castFailed('gerar o charsheet'));
@@ -2987,6 +2999,25 @@ onCast('change', (e) => {
     c.color = t.checked ? card.querySelector('[data-cf=color]').value || '#f2a541' : '';
     renderRail();
     refresh();
+    return;
+  }
+  if (t.matches('[data-upsheet]')) {
+    const cid = card.dataset.c;
+    const files = [...t.files].slice(0, 2);
+    if (!files.length) return;
+    Promise.all(files.map(uploadImage)).then(
+      ([front, side]) =>
+        conn.reducers
+          .uploadCharsheet({
+            storyId,
+            characterId: cid,
+            sheetId: uid('cs'),
+            front,
+            side: side || front,
+          })
+          .then(() => toast('Charsheet enviado'), castFailed('enviar o charsheet')),
+      uploadFailed,
+    );
     return;
   }
   if (t.matches('[data-upsprite]')) {

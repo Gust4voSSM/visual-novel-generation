@@ -36,6 +36,7 @@ import SetLinkAccessReducer from "../set_link_access_reducer";
 import SetProfileReducer from "../set_profile_reducer";
 import ShareStoryReducer from "../share_story_reducer";
 import UpdateCursorReducer from "../update_cursor_reducer";
+import UploadCharsheetReducer from "../upload_charsheet_reducer";
 
 export type AddPoseParams = __Infer<typeof AddPoseReducer>;
 export type ApplyOperationsParams = __Infer<typeof ApplyOperationsReducer>;
@@ -67,4 +68,5 @@ export type SetLinkAccessParams = __Infer<typeof SetLinkAccessReducer>;
 export type SetProfileParams = __Infer<typeof SetProfileReducer>;
 export type ShareStoryParams = __Infer<typeof ShareStoryReducer>;
 export type UpdateCursorParams = __Infer<typeof UpdateCursorReducer>;
+export type UploadCharsheetParams = __Infer<typeof UploadCharsheetReducer>;
 

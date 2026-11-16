@@ -64,6 +64,7 @@ import SetLinkAccessReducer from "./set_link_access_reducer";
 import SetProfileReducer from "./set_profile_reducer";
 import ShareStoryReducer from "./share_story_reducer";
 import UpdateCursorReducer from "./update_cursor_reducer";
+import UploadCharsheetReducer from "./upload_charsheet_reducer";
 
 // Import all procedure arg schemas
 import * as CompleteTextProcedure from "./complete_text_procedure";
@@ -347,6 +348,7 @@ const reducersSchema = __reducers(
   __reducerSchema("set_profile", SetProfileReducer),
   __reducerSchema("share_story", ShareStoryReducer),
   __reducerSchema("update_cursor", UpdateCursorReducer),
+  __reducerSchema("upload_charsheet", UploadCharsheetReducer),
 );
 
 /** The schema information for all procedures in this module. This is defined the same way as the procedures would have been defined in the server. */
