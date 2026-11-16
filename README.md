@@ -162,7 +162,7 @@ Para usar a OpenAI, troque para `AI_PROVIDER=openai` em `worker/.env`, publique 
 Chat, cena sugerida, ação sugerida, completar texto, personagem e background passam a usar a OpenAI.
 O editor pede tudo ao worker; as procedures `suggest_scene` e `complete_text` continuam só com o mock. Opcionais em `worker/.env.openai`:
 `OPENAI_CHAT_MODEL` (padrão `gpt-6-luna`), `OPENAI_REASONING_EFFORT` (padrão `low` nos gpt-5/gpt-6),
-`OPENAI_IMAGE_MODEL` (padrão `gpt-image-2`) e `OPENAI_IMAGE_QUALITY` (padrão `low`). As imagens geradas
+`OPENAI_IMAGE_MODEL` (padrão `gpt-image-2.6-flare`) e `OPENAI_IMAGE_QUALITY` (padrão `medium`). As imagens geradas
 vão para o KV pelas Pages Functions quando o worker tem `IMAGE_API_URL` (veja "Elenco e imagens");
 sem ela, para `client/public/generated/` (ou `IMAGE_DIR`). Os modelos de imagem
 exigem organização verificada na OpenAI. Sprites (charsheet, cor-chave, caminho nativo) e backgrounds:
