@@ -21,4 +21,5 @@ export default __t.row({
   status: __t.string(),
   error: __t.string(),
   createdAt: __t.timestamp().name("created_at"),
+  prompt: __t.string(),
 });

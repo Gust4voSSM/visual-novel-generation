@@ -12,7 +12,7 @@ export type StorySnapshot = { title: string; startScene: string; scenes: StorySc
 
 export type AiContext = {
   characters: { id: string; name: string; desc?: string; sprites: { id: string; name: string; desc?: string }[] }[];
-  backgrounds: { id: string; name: string; desc?: string }[];
+  backgrounds: { id: string; name: string; desc?: string; prompt?: string }[]; // prompt: o da imagem, em inglês
 };
 
 // Mesmo formato de operações do apply_operations (seção 2.3).
@@ -388,8 +388,18 @@ function historyMessages(history: ChatTurn[] | undefined): ChatTurn[] {
 
 // Uma chamada da ferramenta = uma proposta. O modelo escolhe o conteúdo e as ligações; ids e
 // operações são montados aqui e o grafo resultante é conferido, para a proposta caber no grafo atual.
-// O que o BG_ENHANCER pede no fluxo manual; aqui o próprio agente escreve o prompt.
-const BG_PROMPT_RULES = 'Prompt da imagem, em inglês: um parágrafo (60 a 120 palavras) só sobre o lugar: ambiente, arquitetura ou terreno, objetos, materiais, paleta, profundidade (primeiro plano, meio, fundo) e de onde vem a luz. Deixe livre o chão no centro de baixo, onde ficam os sprites. Sem estilo de arte, artistas ou tags de qualidade (o estilo é aplicado depois). Nunca pessoas, personagens, animais em destaque, texto, placas com escrita, logos ou UI.';
+// Regras do prompt de background, as mesmas na melhoria do fluxo manual (BG_ENHANCER) e no campo prompt
+// de novos_backgrounds do agente. Estilo e restrições fixas ficam no template do pipeline.
+const BG_SCENE_RULES = `One English paragraph (60-120 words) describing ONLY the place: setting, architecture or terrain, key objects, materials,
+colour palette, depth (foreground / midground / background layers) and where the light comes from. Concrete visual nouns, no story events.
+Keep everything the author asked for and invent only plausible details that fit it. Keep the lower-centre ground open and uncluttered.
+Do NOT mention art style, medium, artists, camera brands, resolution or quality tags (the style is added separately).
+Never include people, characters, animals in focus, text, signs with writing, logos or UI.`;
+const BG_TIME_RULE = 'one of "day", "sunset", "night", "interior", "water", or "" if not implied';
+const BG_MOOD_RULE = 'a few English words for the atmosphere (e.g. "calm, nostalgic"), or ""';
+const BG_PROMPT_RULES = `Image prompt. ${BG_SCENE_RULES}
+The scenes tell you what the place is and when; describe the place itself, not what happens there.
+To match a related background in the list (its "imagem" line), reuse its materials, palette and light, not its layout.`;
 const CAST_SCHEMA = {
   type: 'array', maxItems: 6, description: 'Elenco em cena (no máximo 6, sem repetir personagem).',
   items: {
@@ -429,8 +439,8 @@ const PROPOSE_TOOL = {
               nome: { type: 'string', description: 'Nome curto em português (ex.: "Sala de aula").' },
               descricao: { type: 'string', description: 'Uma frase em português sobre o lugar, mostrada ao autor.' },
               prompt: { type: 'string', description: BG_PROMPT_RULES },
-              time: { type: 'string', enum: ['day', 'sunset', 'night', 'interior', 'water', ''] },
-              mood: { type: 'string', description: 'Poucas palavras em inglês sobre a atmosfera (ex.: "calm, nostalgic"), ou "".' },
+              time: { type: 'string', enum: ['day', 'sunset', 'night', 'interior', 'water', ''], description: BG_TIME_RULE },
+              mood: { type: 'string', description: BG_MOOD_RULE },
             },
           },
         },
@@ -857,13 +867,9 @@ const BG_SCHEMA = {
 // aqui só o lugar, descrito de forma concreta, para que todo background saia no mesmo estilo anime.
 const BG_ENHANCER = `You write image prompts for background art of an anime visual novel. The author gives a name and a short description, often in Portuguese.
 Return JSON:
-- scene: one English paragraph (60-120 words) describing ONLY the place: setting, architecture or terrain, key objects, materials,
-  colour palette, depth (foreground / midground / background layers) and where the light comes from. Concrete visual nouns, no story events.
-  Keep everything the author asked for and invent only plausible details that fit it. Keep the lower-centre ground open and uncluttered.
-  Do NOT mention art style, medium, artists, camera brands, resolution or quality tags (the style is added separately).
-  Never include people, characters, animals in focus, text, signs with writing, logos or UI.
-- time: one of "day", "sunset", "night", "interior", "water", or "" if the author did not imply one.
-- mood: a few English words for the atmosphere (e.g. "calm, nostalgic"), or "".`;
+- scene: ${BG_SCENE_RULES.replace(/\n/g, '\n  ')}
+- time: ${BG_TIME_RULE}.
+- mood: ${BG_MOOD_RULE}.`;
 const OPTION_SCHEMA = { type: 'object', additionalProperties: false, required: ['label'], properties: { label: { type: 'string' } } };
 
 function systemPrompt(ctx: AiContext, story: StorySnapshot): string {
@@ -905,7 +911,11 @@ function storyBrief(ctx: AiContext, story: StorySnapshot): string {
   }).join('\n');
   const chars = ctx.characters.map(c =>
     `- personagem ${c.id} "${c.name}"${c.desc ? ': ' + clip(c.desc, 160) : ''}\n  sprites: ${c.sprites.map(s => `${s.id} (${s.name})`).join(', ') || 'nenhum'}`).join('\n');
-  const bgs = ctx.backgrounds.map(b => `- ${b.id} "${b.name}"${b.desc ? ': ' + clip(b.desc, 120) : ''}`).join('\n');
+  // Prompt de cada background (o que a imagem mostra), para decidir se serve e combinar backgrounds vizinhos.
+  // Inteiro (~150 tokens) até 12 backgrounds; acima disso, só o começo.
+  const room = ctx.backgrounds.length > 12 ? 300 : 1200;
+  const bgs = ctx.backgrounds.map(b =>
+    `- ${b.id} "${b.name}"${b.desc ? ': ' + clip(b.desc, 400) : ''}${b.prompt ? '\n  imagem: ' + clip(b.prompt, room) : ''}`).join('\n');
   return `História "${story.title}":
 ${scenes || '(vazia)'}
 

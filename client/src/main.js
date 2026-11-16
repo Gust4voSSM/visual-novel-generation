@@ -1607,8 +1607,18 @@ function aiContext() {
     })),
     backgrounds: state.backgrounds
       .filter((b) => b.img)
-      .map((b) => ({ id: b.id, name: b.name, desc: b.desc })),
+      .map((b) => ({ id: b.id, name: b.name, desc: b.desc, prompt: bgPromptText(b.prompt) })),
   };
+}
+// Prompt guardado no background (JSON {scene, time, mood}) como uma linha para o chat.
+function bgPromptText(json) {
+  try {
+    const v = JSON.parse(json || 'null');
+    if (!v?.scene) return undefined;
+    return [v.scene, v.time && `time: ${v.time}`, v.mood && `mood: ${v.mood}`].filter(Boolean).join(' | ');
+  } catch {
+    return undefined;
+  }
 }
 const AI_ERRS = {
   AI_DISABLED: 'a IA está desabilitada neste servidor.',
@@ -5233,6 +5243,7 @@ function writeCast(f) {
       img: imgUrl(v.imageKey),
       status: r?.status || '',
       error: r?.error || '',
+      prompt: r?.prompt || '',
     });
     return b;
   });

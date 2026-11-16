@@ -215,16 +215,18 @@ async function runBackground(input: BackgroundInput) {
       let brief = { scene: `${input.name}: ${input.desc}`, time: input.time ?? '', mood: input.mood ?? '' };
       if (input.prompt?.trim()) {
         brief = { scene: input.prompt.trim().slice(0, 1200), time: input.time ?? '', mood: input.mood ?? '' };
-        log('background: prompt do agente', JSON.stringify(brief));
+        log('background: prompt pronto (agente ou guardado)', JSON.stringify(brief));
+        prompt = brief;
       } else try {
         const b = await provider!.enhanceBackground({ name: input.name, desc: input.desc }, sig);
         brief = { scene: b.scene, time: input.time || b.time, mood: input.mood || b.mood };
         log('background: prompt melhorado', JSON.stringify(brief));
+        prompt = brief;
       } catch (e) {
         if (sig.aborted) throw e;
+        // Sem prompt no resultado: o servidor não guarda a descrição crua, e regenerar tenta melhorar de novo.
         log('background: melhoria do prompt falhou, usando a descrição', shortError(e));
       }
-      prompt = brief;
       const img = await provider!.image({ kind: 'background', prompt: brief.scene, hint, time: brief.time, mood: brief.mood }, sig);
       image_key = await store.put(img);
       base_key = img.base ? await store.put({ bytes: img.base, contentType: 'image/png' }) : image_key;
