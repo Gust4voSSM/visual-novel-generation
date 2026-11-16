@@ -25,7 +25,11 @@ export type Op =
 // backgrounds: backgrounds novos que o agente pede; o cliente dispara a geração ao aceitar, com o
 // prompt já escrito pelo agente (o worker pula a melhoria de prompt).
 export type NewBackground = { id: string; name: string; desc: string; prompt: string; time: string; mood: string };
-export type Proposal = { summary: string[]; ops: Op[]; created: string[]; backgrounds?: NewBackground[] };
+// characters: personagens novos que o cliente manda gerar (generate_character) antes de aplicar ops;
+// as cenas em ops já podem usar os ids deles e das poses.
+export type NewCharacter = { id: string; name: string; desc: string; color: string; poses: { id: string; name: string; desc: string }[] };
+// continuar: o resto do pedido, que o cliente reenvia ao agente quando os personagens forem aceitos.
+export type Proposal = { summary: string[]; ops: Op[]; created: string[]; characters?: NewCharacter[]; continuar?: string; backgrounds?: NewBackground[] };
 
 // history: a conversa anterior desta história, mais antiga primeiro; as propostas vêm resumidas no texto.
 export type ChatTurn = { role: 'user' | 'assistant'; content: string };
@@ -301,7 +305,7 @@ const OPENAI_URL = 'https://api.openai.com/v1';
 // gpt-5.5), foi o mais rápido (1º texto em ~1 s, resposta em ~3 s) com propostas válidas e boa qualidade.
 const CHAT_MODEL = process.env.OPENAI_CHAT_MODEL ?? 'gpt-6-luna';
 const REASONING_EFFORT = process.env.OPENAI_REASONING_EFFORT ?? (/^(gpt-[56]|o\d)/.test(CHAT_MODEL) ? 'low' : undefined);
-const IMAGE_MODEL = process.env.OPENAI_IMAGE_MODEL ?? 'gpt-image-2.6-flare';
+const IMAGE_MODEL = process.env.OPENAI_IMAGE_MODEL ?? 'gpt-image-2.5-flare';
 const IMAGE_QUALITY = process.env.OPENAI_IMAGE_QUALITY ?? 'medium'; // low | medium | high
 const clip = (s: string, n: number) => (s.length > n ? s.slice(0, n) + '…' : s);
 // Preço por 1M de tokens (US$) para o custo no modo experimento. Sem os três, o custo fica null
@@ -420,7 +424,7 @@ const PROPOSE_TOOL = {
   type: 'function',
   function: {
     name: 'propor_mudancas',
-    description: 'Propõe mudanças na história: criar, alterar e remover cenas, e ligar ou remover ações. Sem limite de quantidade. O usuário revisa tudo antes de aplicar.',
+    description: 'Propõe mudanças na história: criar personagens (com imagens geradas), criar, alterar e remover cenas, e ligar ou remover ações. Sem limite de quantidade. O usuário revisa tudo antes de aplicar.',
     parameters: {
       type: 'object',
       additionalProperties: false,
@@ -429,6 +433,33 @@ const PROPOSE_TOOL = {
       properties: {
         resposta: { type: 'string', description: 'Resposta ao usuário (1 a 3 frases), em texto corrido, sem ids.' },
         summary: { type: 'array', items: { type: 'string' }, description: 'Linhas curtas descrevendo cada mudança, pelos títulos e nomes (sem ids nem marcadores como [FINAL]).' },
+        personagens: {
+          type: 'array',
+          description: 'Personagens novos, gerados por IA depois que o usuário aceitar (charsheet e uma imagem por pose). Só quando o pedido precisa de alguém que não está no elenco. Sempre numa chamada separada, sem mudanças de cena: com personagens, deixe criar, alterar, remover, ligar, remover_acoes e novos_backgrounds vazios. ref é um apelido curto e único (ex.: "p1").',
+          items: {
+            type: 'object', additionalProperties: false, required: ['ref', 'name', 'desc', 'poses'],
+            properties: {
+              ref: { type: 'string' },
+              name: { type: 'string', description: 'Nome do personagem.' },
+              desc: { type: 'string', description: 'Design visual fixo, em inglês, seguindo as regras de personagens das instruções.' },
+              poses: {
+                type: 'array', minItems: 1, maxItems: 12,
+                items: {
+                  type: 'object', additionalProperties: false, required: ['ref', 'name', 'desc'],
+                  properties: {
+                    ref: { type: 'string' },
+                    name: { type: 'string', description: 'Nome curto da pose/emoção, em português (ex.: "Falando").' },
+                    desc: { type: 'string', description: 'A pose, em inglês: expressão + um gesto simples (ex.: "thinking, one hand touching the chin, eyes looking up").' },
+                  },
+                },
+              },
+            },
+          },
+        },
+        continuar: {
+          type: 'string',
+          description: 'Só com personagens: o que ainda falta fazer do pedido depois que o usuário aceitar os personagens (ex.: "criar a cena em que Rafa chega à praia e fala com Lia"), em uma ou duas frases; "" se nada. É reenviado a você automaticamente, com os personagens novos no elenco.',
+        },
         novos_backgrounds: {
           type: 'array', maxItems: 4,
           description: 'Backgrounds novos, gerados por IA quando o usuário aceita. Só quando nenhum background da lista serve. ref é um apelido curto e único (ex.: "b1") para usar no bg das cenas.',
@@ -479,10 +510,14 @@ const PROPOSE_TOOL = {
 const THOUGHT_BREAK = '\u0000'; // stream → chat: começa um parágrafo do resumo
 const RESPONSES_TOOL = { type: 'function', ...PROPOSE_TOOL.function, strict: false } as const;
 
+const MAX_POSES = 12; // igual ao generate_character do módulo
+type CharacterArgs = { ref: string; name: string; desc: string; poses: { ref: string; name: string; desc: string }[] };
 type BgArgs = { ref: string; nome?: string; descricao?: string; prompt?: string; time?: string; mood?: string };
 type SceneArgs = { title?: string; bg?: string; cast?: { character: string; sprite: string }[]; kind?: string; speaker?: string; text?: string };
 export type ProposeArgs = {
   resposta: string; summary?: string[];
+  personagens?: CharacterArgs[];
+  continuar?: string;
   novos_backgrounds?: BgArgs[];
   criar?: (SceneArgs & { ref: string })[];
   alterar?: (SceneArgs & { id: string })[];
@@ -810,6 +845,39 @@ ${storyBrief(input.context, story)}`, `Cena "${sc.title}": ${clip(sc.text, 600) 
 }
 
 // Formato do texto de uma cena, igual em todos os prompts que escrevem texto.
+// Regras para criar personagens, tiradas dos experimentos de imagem (GPT Image + Qwen/ComfyUI, chroma key;
+// output/peca-chroma-key e worker/IMAGENS-EXPERIMENTO.md). desc e as poses vão quase literais para os
+// prompts do charsheet e das poses (imaging/pipeline.ts).
+const CHARACTER_RULES = `Personagens novos (campo personagens):
+- Crie um personagem só quando o pedido precisa de alguém que não está no elenco, ou quando o usuário pede. Nunca
+  recrie quem já existe. Personagens novos vão sempre numa chamada própria de propor_mudancas, sem nenhuma mudança
+  de cena. Se o pedido também envolve cenas com o personagem, não as proponha agora: escreva em continuar o que
+  falta fazer. Quando o usuário aceitar, você recebe uma mensagem "(Personagens aceitos: ...)" com o elenco novo
+  (as poses aparecem já, ainda gerando) e então propõe as cenas. Na resposta, diga que as cenas vêm depois.
+- As imagens são geradas a partir de desc e de cada pose: escreva os dois em inglês, como descrição visual concreta.
+- desc é o design fixo, repetido igual em todas as imagens do personagem. Descreva só o que se vê, de corpo inteiro:
+  tipo de corpo e idade aparente, cabelo (cor, comprimento, penteado), rosto e olhos, roupa peça por peça com cores
+  nomeadas, calçados e acessórios. Seja específico e consistente (ex.: "navy blue blazer with gold buttons", não
+  "roupa elegante"). Sem personalidade, história, cenário, iluminação, estilo de arte, fundo ou pose: isso o
+  sistema já define. 2 a 5 frases.
+- Cabelo como forma e cor, do jeito que se desenha num sprite de VN: penteado e silhueta, comprimento, franja,
+  mechas grandes ou topete marcantes e a cor (ex.: "spiky dark brown hair swept back, a few large locks over the
+  forehead"). Não descreva fios, textura ou brilho do cabelo.
+- Evite palavras de textura e desgaste que puxam para o realista: weathered, rugged, gritty, grizzled, worn, rough
+  skin, pores, detailed, realistic. Marcas que definem o personagem podem entrar, ditas de forma simples (ex.:
+  "wrinkles around the eyes" num idoso, "a scar across the left cheek"); barba só se for parte do visual, e então
+  como forma ("short full beard"), não "stubble".
+- Evite no design materiais transparentes ou translúcidos (vidro, véus, rendas finas, fumaça, brilhos soltos) e
+  partes soltas longe do corpo: o recorte do fundo funciona melhor com silhueta opaca e contorno bem definido.
+  Qualquer paleta serve: a cor do fundo para o recorte é escolhida automaticamente.
+- Poses: uma por emoção que as cenas vão usar; comece com 3 a 4 (ex.: neutro, falando, pensando e uma emoção da
+  história). Cada pose = expressão + UM gesto simples de conversa, com os dois pés no chão e as mãos visíveis (ex.:
+  "speaking, one hand raised palm up at chest height, mouth open, friendly smile"). A silhueta precisa ser bem
+  diferente da posição neutra em pé (braços para baixo, olhando para a frente), senão a pose sai igual à
+  referência; mas não descreva vários ajustes de quadril, joelho, ombros e braços, que deixam a pose estranha.
+  Sem pernas levantadas, saltos, corridas, objetos grandes nas mãos ou outros personagens na mesma pose.
+- As imagens levam alguns minutos e aparecem sozinhas depois que o usuário aceita; não prometa imagens prontas.`;
+
 const TEXT_RULES = `Formato do texto de cada cena:
 - fala (dialogue): o texto é SÓ o que quem fala diz, em primeira pessoa, como aparece no balão do jogo. Sem o nome
   de quem fala, sem aspas ou travessão, sem "diz", "sussurra" etc., sem gestos, reações ou ambiente.
@@ -885,6 +953,7 @@ Regras do grafo, que a proposta precisa respeitar depois de aplicada:
 - a cena [INÍCIO] não pode ser removida;
 - em fala (dialogue), quem fala precisa estar no elenco da cena; no máximo 6 personagens por cena.
 ${TEXT_RULES}
+${CHARACTER_RULES}
 Para seguir de uma cena, ligue a saída única dela (choice "next") ou crie uma ação nova (choice ""). Ao criar uma
 ação numa cena com saída única, a saída única vira uma ação "Continuar". Remover uma cena apaga as ações dela e deixa
 sem destino o que apontava para ela; religue o que fizer sentido.
@@ -978,6 +1047,34 @@ export function graphProblem(start: string, scenes: Map<string, WScene>, choices
 // devolve os problemas em texto, com os ids, para o modelo corrigir (veja OpenAiProvider.chat).
 export function buildProposal(a: ProposeArgs, ctx: AiContext, story: StorySnapshot): Proposal | string {
   const sprites = new Map(ctx.characters.map(c => [c.id, c.sprites.map(s => s.id)]));
+  const names = new Map(ctx.characters.map(c => [c.id, c.name]));
+  // Personagens novos: ids definitivos já aqui; o cliente manda gerar com eles ao aceitar.
+  const charRefs = new Set<string>();
+  const newChars: NewCharacter[] = [];
+  const errs: string[] = [];
+  for (const n of a.personagens ?? []) {
+    const where = `personagens "${n.ref || n.name}"`;
+    const name = clip((n.name ?? '').trim(), 80), desc = (n.desc ?? '').trim();
+    if (!n.ref || charRefs.has(n.ref)) { errs.push(`${where}: ref ausente, repetido ou igual a um id existente`); continue; }
+    if (!name) errs.push(`${where}: falta o nome`);
+    if (name && [...names.values()].some(x => norm(x) === norm(name))) errs.push(`${where}: já existe um personagem "${name}"; use o que está no elenco`);
+    if (desc.length < 40) errs.push(`${where}: desc precisa ser o design visual completo (cabelo, rosto, roupa, cores, acessórios)`);
+    const poses = n.poses ?? [];
+    if (!poses.length || poses.length > MAX_POSES) errs.push(`${where}: de 1 a ${MAX_POSES} poses`);
+    const id = newId('c'), pm = new Set<string>();
+    const list = poses.map((p, i) => {
+      const pid = newId('sp');
+      if (p.ref) { if (pm.has(p.ref)) errs.push(`${where}: pose ref "${p.ref}" repetido`); pm.add(p.ref); }
+      if (!(p.desc ?? '').trim()) errs.push(`${where}: a pose "${p.name || i + 1}" precisa de desc`);
+      return { id: pid, name: clip((p.name ?? '').trim() || 'Pose', 80), desc: clip((p.desc ?? '').trim(), 1000) };
+    });
+    charRefs.add(n.ref);
+    names.set(id, name); // só para não repetir o nome dentro da proposta
+    newChars.push({ id, name, desc: clip(desc, 2000), color: '', poses: list });
+  }
+  // Personagem novo é sempre uma proposta à parte: as cenas só o usam depois de aceito.
+  if (newChars.length && [a.criar, a.alterar, a.remover, a.ligar, a.remover_acoes, a.novos_backgrounds].some(x => x?.length))
+    errs.push('personagens vai numa chamada própria, sem mudanças de cena: chame propor_mudancas uma vez só com personagens (criar, alterar, remover, ligar, remover_acoes e novos_backgrounds vazios) e outra com as cenas, que não podem usar o personagem novo até ele ser aceito');
   const bgs = new Set(ctx.backgrounds.map(b => b.id));
   const bgRefs = new Map<string, string>();
   const newBgs: NewBackground[] = [];
@@ -989,7 +1086,6 @@ export function buildProposal(a: ProposeArgs, ctx: AiContext, story: StorySnapsh
   const choices = new Map([...orig.choices].map(([k, v]) => [k, { ...v }]));
   const refs = new Map<string, string>();
   const created: string[] = [];
-  const errs: string[] = [];
   const resolve = (k: string) => refs.get(k) ?? (scenes.has(k) ? k : '');
   const castJson = (cast: SceneArgs['cast'], where: string) => {
     const seen = new Set<string>();
@@ -1031,7 +1127,6 @@ export function buildProposal(a: ProposeArgs, ctx: AiContext, story: StorySnapsh
     if (first && cast.length < 6) s.chars = JSON.stringify([...cast, { c: s.speaker, s: first }]);
     else errs.push(`${where}: quem fala ("${s.speaker}") precisa estar no elenco`);
   };
-  const names = new Map(ctx.characters.map(c => [c.id, c.name]));
   const checkSpeech = (s: WScene, where: string) => {
     if (s.kind !== 'dialogue') return;
     s.text = cleanSpeech(s.text);
@@ -1136,20 +1231,22 @@ export function buildProposal(a: ProposeArgs, ctx: AiContext, story: StorySnapsh
   }
   for (const [id, c] of orig.choices) if (!choices.has(id) && !removed.has(c.sceneId)) ops.push({ op: 'delete_choice', id });
   for (const id of removed) if (orig.scenes.has(id)) ops.push({ op: 'delete_scene', id });
-  if (!ops.length) return 'a proposta não mudava nada';
+  if (!ops.length && !newChars.length) return 'a proposta não mudava nada';
   const used = new Set([...scenes.values()].map(s => s.bg));
   const unused = newBgs.filter(b => !used.has(b.id));
   if (unused.length) return unused.map(b => `novos_backgrounds "${b.name}": nenhuma cena usa este background; ponha o ref dele no bg de alguma cena ou tire-o`).join('; ');
 
   const title = (id: string) => `“${orig.scenes.get(id)?.title ?? scenes.get(id)?.title ?? ''}”`;
   const summary = a.summary?.length ? a.summary : [
+    ...newChars.map(c => `Criar personagem ${c.name} (${c.poses.length} pose${c.poses.length > 1 ? 's' : ''})`),
     ...[...isNew].map(id => `Criar cena ${title(id)}`),
     ...(a.alterar ?? []).filter(u => orig.scenes.has(u.id) && !removed.has(u.id)).map(u => `Alterar ${title(u.id)}`),
     ...[...removed].filter(id => orig.scenes.has(id)).map(id => `Remover ${title(id)}`),
   ];
   if (!summary.length) summary.push('Religar ações');
   summary.unshift(...newBgs.map(b => `Gerar background “${b.name}”`));
-  return { summary, ops, created: [...isNew], ...(newBgs.length ? { backgrounds: newBgs } : {}) };
+  const next = newChars.length ? clip((a.continuar ?? '').trim(), 600) : '';
+  return { summary, ops, created: [...isNew], ...(newChars.length ? { characters: newChars } : {}), ...(next ? { continuar: next } : {}), ...(newBgs.length ? { backgrounds: newBgs } : {}) };
 }
 
 // JSON cortado no meio (argumentos da ferramenta chegando aos pedaços): fecha o que estiver aberto

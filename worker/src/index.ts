@@ -47,7 +47,10 @@ function castContext(storyId: string, sent?: AiContext): AiContext {
   const characters = [...conn.db.workerCharacter.iter()].filter(c => c.storyId === storyId);
   const backgrounds = [...conn.db.workerBackground.iter()].filter(b => b.storyId === storyId && b.imageKey);
   if (!characters.length && !backgrounds.length && sent) return sent;
-  const sprites = [...conn.db.workerSprite.iter()].filter(s => s.storyId === storyId && s.imageKey).sort((a, b) => a.position - b.position);
+  // Poses ainda gerando entram: o agente já pode pôr um personagem recém-aceito nas cenas.
+  const sprites = [...conn.db.workerSprite.iter()]
+    .filter(s => s.storyId === storyId && (s.imageKey || s.status === 'pending' || s.status === 'generating'))
+    .sort((a, b) => a.position - b.position);
   return {
     characters: characters.map(c => ({
       id: c.id, name: c.name, desc: c.desc,

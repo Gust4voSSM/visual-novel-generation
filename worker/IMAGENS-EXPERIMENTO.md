@@ -38,7 +38,7 @@ O meta de cada pose traz `path`, `accepted`, `fellBack`, as novas tentativas por
 | Variável | Padrão | Uso |
 | --- | --- | --- |
 | `AI_IMAGE_PROVIDER=openai` | (mock) | Liga as imagens reais. Sem ela, imagens continuam no mock. |
-| `OPENAI_IMAGE_MODEL` | `gpt-image-2.6-flare` | |
+| `OPENAI_IMAGE_MODEL` | `gpt-image-2.5-flare` | Em 2026-11-16, com o mesmo design e os mesmos prompts, saiu bem mais próximo de um sprite de VN que o `gpt-image-2` em `low` (cabelo em mechas grandes, sombra chapada no rosto) e é mais barato. |
 | `OPENAI_IMAGE_QUALITY` | `low` | Tier `low`, `medium` ou `high` (questão em aberto, medir no T1). |
 | `AI_SPRITE_PATH` | `keyed` | `native` depois da decisão de T1–T2. |
 | `OPENAI_IMAGE_MODEL_NATIVE` | (o de `OPENAI_IMAGE_MODEL`) | Modelo só do caminho nativo. Em 2026-11-14 o `gpt-image-2` recusou `background: "transparent"` com HTTP 400 ("Transparent background is not supported for this model"). Relatos apontam a família `gpt-image-2.5` e o `gpt-image-1.5` para transparência. Um 400 no nativo conta como tentativa falha, sem repetir, e a pose sai pelo keyed. |

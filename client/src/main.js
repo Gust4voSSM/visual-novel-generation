@@ -1616,8 +1616,9 @@ function aiContext() {
       id: c.id,
       name: c.name,
       desc: c.desc,
+      // Poses ainda gerando entram: o agente já pode pôr o personagem novo nas cenas.
       sprites: c.sprites
-        .filter((s) => s.img)
+        .filter((s) => s.img || busy(s))
         .map((s) => ({ id: s.id, name: s.name, desc: s.desc })),
     })),
     backgrounds: state.backgrounds
@@ -4511,6 +4512,8 @@ function propStatus(p, key) {
     v = localStorage.getItem(PROP_KEY + key);
   } catch (_) {}
   if (v) return v;
+  if (p.characters?.length)
+    return p.characters.every((c) => conn.db.curCharacter.id.find(c.id)) ? 'ok' : null;
   const created = createdOf(p);
   if (!p.created) return created.length ? null : 'ok'; // proposta antiga: só criava cenas, e a cena nova já existe
   if (created.length) return created.some((id) => scene(id)) ? 'ok' : null;
@@ -4518,6 +4521,41 @@ function propStatus(p, key) {
   return diffFlat(f, applyOps(cloneFlat(f), JSON.parse(JSON.stringify(p.ops)))).length
     ? null
     : 'ok';
+}
+// Proposta de personagens com "continuar": quando o usuário decide todas as propostas de personagens
+// da mesma resposta e aceitou ao menos uma, o resto do pedido volta sozinho para o agente, já com o
+// elenco novo no contexto. Cada resposta continua uma vez só.
+const continued = new Set();
+function continueAfterCharacters(key) {
+  const rowId = key.slice(0, key.lastIndexOf(':'));
+  if (continued.has(rowId)) return;
+  const row = conn.db.myChatMessage.id.find(rowId);
+  let props = [];
+  try {
+    props = JSON.parse(row?.proposals || '[]');
+  } catch (_) {}
+  const chars = props.map((p, i) => [p, rowId + ':' + i]).filter(([p]) => p.characters?.length);
+  const next = chars.map(([p]) => p.continuar).find(Boolean);
+  if (!next || chars.some(([p, k]) => !propStatus(p, k))) return;
+  const ok = chars.filter(([p, k]) => propStatus(p, k) === 'ok').flatMap(([p]) => p.characters);
+  if (!ok.length) return;
+  continued.add(rowId);
+  // Espera as linhas dos personagens chegarem pela assinatura, para irem no contexto.
+  const t0 = performance.now();
+  const go = () => {
+    // Personagem e poses chegam por views diferentes: espera as duas.
+    const ready = ok.every((c) => {
+      const x = state.characters.find((y) => y.id === c.id);
+      return x && c.poses.every((p) => x.sprites.some((s) => s.id === p.id));
+    });
+    if (!ready && performance.now() - t0 < 10_000) return setTimeout(go, 100);
+    const message = `(Personagens aceitos: ${ok.map((c) => c.name).join(', ')}. Continue o pedido.) ${next}`;
+    requestAi('chat', { message, context: aiContext(), history: chatHistory() }).catch((err) => {
+      continued.delete(rowId);
+      toast('A IA não recebeu a continuação: ' + aiMessage(err), 'err');
+    });
+  };
+  go();
 }
 function proposalCard(p, key) {
   const card = document.createElement('div');
@@ -4530,7 +4568,9 @@ function proposalCard(p, key) {
         .filter((o) => o.op === 'upsert_scene' && !created.has(o.scene.id))
         .map((o) => o.scene.id),
     ).size;
+  const nChar = (p.characters || []).length;
   const chips = [
+    nChar && `+${nChar} personagem${nChar > 1 ? 's' : ''}`,
     nNew && `+${nNew} cena${nNew > 1 ? 's' : ''}`,
     nEdit && `${nEdit} alterada${nEdit > 1 ? 's' : ''}`,
     nDel && `${nDel} removida${nDel > 1 ? 's' : ''}`,
@@ -4543,6 +4583,7 @@ function proposalCard(p, key) {
   card.querySelector('[data-ok]')?.addEventListener('click', () => {
     if (acceptProposal(p)) {
       propMark(key, 'ok');
+      continueAfterCharacters(key);
       card.classList.add('done');
       card.querySelector('.row').innerHTML =
         '<span class="hint">Aceita · Ctrl+Z desfaz tudo de uma vez</span>';
@@ -4555,6 +4596,7 @@ function proposalCard(p, key) {
   card.querySelector('[data-no]')?.addEventListener('click', () => {
     if (draft && draft.card === card) clearDraft();
     propMark(key, 'no');
+    continueAfterCharacters(key);
     card.classList.add('done');
     card.querySelector('.row').innerHTML = '<span class="hint">Recusada</span>';
   });
@@ -4658,6 +4700,28 @@ function acceptProposal(p) {
     return false;
   }
   if (draft && draft.p === p) clearDraft();
+  // Personagens novos (sempre numa proposta só deles): as linhas nascem já, gerando.
+  // Reenvio do mesmo personagem é ignorado pelo módulo; os pedidos saem em ordem pela mesma conexão.
+  for (const c of p.characters || []) {
+    if (conn.db.curCharacter.id.find(c.id)) continue;
+    conn.reducers
+      .generateCharacter({
+        storyId,
+        characterId: c.id,
+        jobId: uid('j'),
+        name: c.name,
+        desc: c.desc,
+        color: c.color || '',
+        poses: JSON.stringify(c.poses),
+      })
+      .catch((e) => toast(`Não deu para gerar ${c.name}: ${errMsg(e)}`, 'err'));
+    freshCards.set(c.id, performance.now());
+  }
+  if ((p.characters || []).length) {
+    renderRail();
+    toast(`Gerando ${p.characters.map((c) => c.name).join(', ')}: as imagens aparecem em alguns minutos`, 'ai');
+  }
+  if (!plan.ops.length) return true;
   const before = cloneFlat(f);
   pushUndo();
   applyOps(f, plan.ops);
