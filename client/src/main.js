@@ -291,6 +291,21 @@ const scene = (id) => state.scenes.find((s) => s.id === id);
 // Rascunho da proposta do chat aberta no canvas (veja renderDraft): {p, card, plan, t0, view}.
 let draft = null;
 const draftsEl = $('#drafts');
+const draftOpen = new Set();
+// Expandir/recolher uma cena do rascunho (só leitura): mostra o texto inteiro e os detalhes.
+draftsEl.addEventListener('pointerdown', (e) => {
+  if (e.target.closest('[data-dtoggle]')) e.stopPropagation();
+});
+draftsEl.addEventListener('click', (e) => {
+  const b = e.target.closest('[data-dtoggle]');
+  if (!b) return;
+  e.stopPropagation();
+  const id = b.dataset.dtoggle;
+  if (draftOpen.has(id)) draftOpen.delete(id);
+  else draftOpen.add(id);
+  if (draft) draft.t0 = performance.now() - 5000;
+  renderNodes();
+});
 const charById = (id) => state.characters.find((c) => c.id === id);
 const bgById = (id) => state.backgrounds.find((b) => b.id === id);
 const spriteOf = (c, sid) => c && c.sprites.find((s) => s.id === sid);
@@ -798,13 +813,13 @@ function nodeHTML(s, ws, reach, lnk, incoming) {
     const opts = s.choices
       .map((ch, i) => {
         const pc = portCls(s.id, ch.id, lnk);
-        return `<div class="orow c${ch.gen ? ' optgen' : ''}${ch.target ? '' : ' draft'}${rowFresh('opt:' + ch.id)}"><span class="onum">${i + 1}</span><span class="olabel" data-act="clabel" data-i="${i}">${ch.label ? esc(ch.label) : '<i class="none">sem texto</i>'}</span>${ch.target ? '' : '<span class="tag warn">sem destino</span>'}<button class="port out ${pc}${ch.target ? '' : ' draft'}" data-out="${s.id}" data-ch="${ch.id}" aria-label="Saída da ação ${esc(ch.label)}${ch.target ? '' : ', sem destino'}"></button></div>`;
+        return `<div class="orow c${ch.gen ? ' optgen' : ''}${ch.target ? '' : ' draft'}${rowFresh('opt:' + ch.id)}"><span class="onum">${i + 1}</span><span class="olabel" data-act="clabel" data-i="${i}">${ch.label ? esc(ch.label) : '<i class="none">sem texto</i>'}</span>${ch.target ? '' : '<span class="tag warn">sem destino</span>'}<button class="iconbtn sm" data-act="rmchoice" data-i="${i}" aria-label="Remover ação"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M7 7l10 10M17 7L7 17"/></svg></button><button class="port out ${pc}${ch.target ? '' : ' draft'}" data-out="${s.id}" data-ch="${ch.id}" aria-label="Saída da ação ${esc(ch.label)}${ch.target ? '' : ', sem destino'}"></button></div>`;
       })
       .join('');
     const single = !nOpts
       ? `<div class="orow c"><span class="nextlabel">${s.next ? 'continuar → ' + esc(scene(s.next)?.title || '') : 'continuar'}</span><button class="port out ${portCls(s.id, '', lnk)}" data-out="${s.id}" data-ch="" aria-label="Saída única de ${esc(s.title)}"></button></div>`
       : '';
-    return `<div class="${cls.join(' ')}" data-id="${s.id}" style="${style}">${head}<div class="mid"><div class="sec">${stageMini(s)}${lkText ? lockBadge(lkText) : ''}<div class="sum">${sum}</div></div></div>${opts}${single}</div>`;
+    return `<div class="${cls.join(' ')}" data-id="${s.id}" style="${style}">${head}<div class="mid"><div class="sec">${stageMini(s)}${lkText ? lockBadge(lkText) : ''}<div class="sum">${sum}</div></div></div>${opts}${single}<div class="nfoot"><button class="addbtn" data-act="addchoice" data-hover="add">+ ação</button></div></div>`;
   }
   // elenco = quem está no palco; a barra mostra os sprites do personagem escolhido (clique nele no palco)
   const selC = castSelOf(s),
@@ -4393,7 +4408,11 @@ function draftHTML(id, v, f, tag, i) {
         .join('')
     : `<div class="orow c"><span class="nextlabel">${v.next ? 'continuar → ' + esc(f.scenes.get(v.next)?.title || '') : 'continuar'}</span><span class="port out" data-dout="${id}" data-dch=""></span></div>`;
   const at = s ? { x: dispX(s), y: dispY(s) } : v;
-  return `<div class="node dnode${s ? ' dedit' : ''}" style="left:${at.x}px;top:${at.y}px;animation-delay:${i * 90 - ago(draft.t0)}ms"><div class="nhead"><span class="port in" data-din="${id}"></span><span class="dtitle">${esc(v.title)}</span><span class="tag ai">${SPARK}${tag}</span></div><div class="mid"><div class="sec">${stageMini({ ...v, chars })}<div class="sum">${sum}</div></div></div>${rows}</div>`;
+  const open = draftOpen.has(id);
+  const bg = state.backgrounds.find((b) => b.id === v.bg);
+  const cast = chars.map((cc) => charById(cc.c)).filter(Boolean);
+  const det = `<div class="ddet"><div><span class="lbl">background</span> ${bg ? esc(bg.name) : 'sem background'}</div><div><span class="lbl">elenco</span> ${cast.length ? cast.map((c) => `<span style="color:${c.color || 'inherit'}">${esc(c.name)}</span>`).join(', ') : 'ninguém'}</div><div><span class="lbl">tipo</span> ${v.kind === 'dialogue' ? 'fala' + (spk ? ' de ' + esc(spk.name) : '') : 'narração'}</div></div>`;
+  return `<div class="node dnode${s ? ' dedit' : ''}${open ? ' exp' : ''}" style="left:${at.x}px;top:${at.y}px;animation-delay:${i * 90 - ago(draft.t0)}ms"><div class="nhead"><span class="port in" data-din="${id}"></span><span class="dtitle">${esc(v.title)}</span><span class="tag ai">${SPARK}${tag}</span><button class="iconbtn sm ntoggle dtoggle" data-dtoggle="${id}" aria-expanded="${open}" aria-label="${open ? 'Recolher' : 'Expandir'} cena proposta" title="${open ? 'Recolher' : 'Expandir'}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg></button></div><div class="mid"><div class="sec">${stageMini({ ...v, chars })}${open ? det : ''}<div class="sum">${sum}</div></div></div>${rows}</div>`;
 }
 // Chamado pelo renderNodes: as marcas nas cenas reais e as cenas do rascunho acompanham o grafo.
 function renderDraft() {
@@ -4443,6 +4462,7 @@ function draftBtn(card, on) {
   if (b) b.textContent = on ? 'Ocultar do canvas' : 'Ver no canvas';
 }
 function clearDraft() {
+  draftOpen.clear();
   if (!draft) return;
   draftBtn(draft.card, false);
   draft = null;
