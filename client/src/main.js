@@ -1,5 +1,6 @@
 import { DbConnection } from './module_bindings';
 import qrcode from 'qrcode-generator';
+import { downloadStoryHtml } from './export.js';
 /* ---------- elenco de exemplo (desenhos em art.js, arquivos em public/example) ---------- */
 import { EXAMPLE, MARKET, spriteKey, bgKey, norm } from './art.js';
 
@@ -2517,6 +2518,30 @@ $('#btnAddScene').onclick = () => {
   burst(s.x, s.y + 20, 'plain');
 };
 $('#btnPlay').onclick = () => openPlay();
+$('#btnExport').onclick = async (e) => {
+  const b = e.currentTarget;
+  if (b.disabled) return;
+  if (!scene(state.start)) {
+    toast('Defina uma cena inicial.', 'err');
+    return;
+  }
+  b.disabled = true;
+  toast('Gerando HTML…');
+  try {
+    const r = await downloadStoryHtml(state);
+    toast(
+      r.failed.length
+        ? `Exportado (${r.count} cenas), mas ${r.failed.length} imagem(ns) não carregaram.`
+        : `Exportado: ${r.count} cenas.`,
+      r.failed.length ? 'err' : undefined,
+    );
+  } catch (err) {
+    console.error(err);
+    toast('Falha ao exportar: ' + err.message, 'err');
+  } finally {
+    b.disabled = false;
+  }
+};
 const appEl = $('.app');
 const mqNarrow = matchMedia('(max-width:900px)');
 const panels = { rail: true, chat: true };
