@@ -22,7 +22,10 @@ export type Op =
   | { op: 'upsert_choice'; choice: Record<string, unknown> & { id: string } }
   | { op: 'delete_choice'; id: string };
 // created: ids das cenas que a proposta cria; as outras cenas em upsert_scene já existem e são alteradas.
-export type Proposal = { summary: string[]; ops: Op[]; created: string[] };
+// backgrounds: backgrounds novos que o agente pede; o cliente dispara a geração ao aceitar, com o
+// prompt já escrito pelo agente (o worker pula a melhoria de prompt).
+export type NewBackground = { id: string; name: string; desc: string; prompt: string; time: string; mood: string };
+export type Proposal = { summary: string[]; ops: Op[]; created: string[]; backgrounds?: NewBackground[] };
 
 // history: a conversa anterior desta história, mais antiga primeiro; as propostas vêm resumidas no texto.
 export type ChatTurn = { role: 'user' | 'assistant'; content: string };
@@ -385,6 +388,8 @@ function historyMessages(history: ChatTurn[] | undefined): ChatTurn[] {
 
 // Uma chamada da ferramenta = uma proposta. O modelo escolhe o conteúdo e as ligações; ids e
 // operações são montados aqui e o grafo resultante é conferido, para a proposta caber no grafo atual.
+// O que o BG_ENHANCER pede no fluxo manual; aqui o próprio agente escreve o prompt.
+const BG_PROMPT_RULES = 'Prompt da imagem, em inglês: um parágrafo (60 a 120 palavras) só sobre o lugar: ambiente, arquitetura ou terreno, objetos, materiais, paleta, profundidade (primeiro plano, meio, fundo) e de onde vem a luz. Deixe livre o chão no centro de baixo, onde ficam os sprites. Sem estilo de arte, artistas ou tags de qualidade (o estilo é aplicado depois). Nunca pessoas, personagens, animais em destaque, texto, placas com escrita, logos ou UI.';
 const CAST_SCHEMA = {
   type: 'array', maxItems: 6, description: 'Elenco em cena (no máximo 6, sem repetir personagem).',
   items: {
@@ -394,7 +399,7 @@ const CAST_SCHEMA = {
 } as const;
 const SCENE_PROPS = {
   title: { type: 'string' },
-  bg: { type: 'string', description: 'id de um background do contexto, ou "" para nenhum.' },
+  bg: { type: 'string', description: 'id de um background do contexto, ref de um item de novos_backgrounds, ou "" para nenhum.' },
   cast: CAST_SCHEMA,
   kind: { type: 'string', enum: ['narration', 'dialogue'] },
   speaker: { type: 'string', description: 'id do personagem que fala (dialogue), ou "".' },
@@ -410,10 +415,25 @@ const PROPOSE_TOOL = {
       type: 'object',
       additionalProperties: false,
       // resposta vem primeiro: é transmitida ao usuário enquanto o resto dos argumentos chega.
-      required: ['resposta', 'summary', 'criar', 'alterar', 'remover', 'ligar', 'remover_acoes'],
+      required: ['resposta', 'summary', 'novos_backgrounds', 'criar', 'alterar', 'remover', 'ligar', 'remover_acoes'],
       properties: {
         resposta: { type: 'string', description: 'Resposta ao usuário (1 a 3 frases), em texto corrido, sem ids.' },
         summary: { type: 'array', items: { type: 'string' }, description: 'Linhas curtas descrevendo cada mudança, pelos títulos e nomes (sem ids nem marcadores como [FINAL]).' },
+        novos_backgrounds: {
+          type: 'array', maxItems: 4,
+          description: 'Backgrounds novos, gerados por IA quando o usuário aceita. Só quando nenhum background da lista serve. ref é um apelido curto e único (ex.: "b1") para usar no bg das cenas.',
+          items: {
+            type: 'object', additionalProperties: false, required: ['ref', 'nome', 'descricao', 'prompt', 'time', 'mood'],
+            properties: {
+              ref: { type: 'string' },
+              nome: { type: 'string', description: 'Nome curto em português (ex.: "Sala de aula").' },
+              descricao: { type: 'string', description: 'Uma frase em português sobre o lugar, mostrada ao autor.' },
+              prompt: { type: 'string', description: BG_PROMPT_RULES },
+              time: { type: 'string', enum: ['day', 'sunset', 'night', 'interior', 'water', ''] },
+              mood: { type: 'string', description: 'Poucas palavras em inglês sobre a atmosfera (ex.: "calm, nostalgic"), ou "".' },
+            },
+          },
+        },
         criar: {
           type: 'array',
           description: 'Cenas novas. ref é um apelido curto e único (ex.: "n1") para usar em ligar.',
@@ -449,9 +469,11 @@ const PROPOSE_TOOL = {
 const THOUGHT_BREAK = '\u0000'; // stream → chat: começa um parágrafo do resumo
 const RESPONSES_TOOL = { type: 'function', ...PROPOSE_TOOL.function, strict: false } as const;
 
+type BgArgs = { ref: string; nome?: string; descricao?: string; prompt?: string; time?: string; mood?: string };
 type SceneArgs = { title?: string; bg?: string; cast?: { character: string; sprite: string }[]; kind?: string; speaker?: string; text?: string };
 export type ProposeArgs = {
   resposta: string; summary?: string[];
+  novos_backgrounds?: BgArgs[];
   criar?: (SceneArgs & { ref: string })[];
   alterar?: (SceneArgs & { id: string })[];
   remover?: string[];
@@ -862,7 +884,10 @@ ação numa cena com saída única, a saída única vira uma ação "Continuar".
 sem destino o que apontava para ela; religue o que fizer sentido.
 As mensagens anteriores são a conversa até aqui, com cada proposta marcada como aceita, recusada ou pendente; a
 história abaixo já inclui as aceitas. Não repita propostas recusadas sem que o usuário peça.
-Pense em português. Use somente ids que aparecem abaixo, ou os refs das cenas que você criar. Mantenha o tom e a continuidade da história.
+Backgrounds: use um da lista quando servir. Se nenhum servir para o lugar da cena, peça um novo em novos_backgrounds
+(gerado por IA quando o usuário aceita) e use o ref dele no bg das cenas; um background novo serve a todas as cenas do
+mesmo lugar. Escreva você mesmo o prompt dele, concreto e em inglês, como descrito no campo.
+Pense em português. Use somente ids que aparecem abaixo, ou os refs das cenas e backgrounds que você criar. Mantenha o tom e a continuidade da história.
 
 ${storyBrief(ctx, story)}`;
 }
@@ -944,6 +969,8 @@ export function graphProblem(start: string, scenes: Map<string, WScene>, choices
 export function buildProposal(a: ProposeArgs, ctx: AiContext, story: StorySnapshot): Proposal | string {
   const sprites = new Map(ctx.characters.map(c => [c.id, c.sprites.map(s => s.id)]));
   const bgs = new Set(ctx.backgrounds.map(b => b.id));
+  const bgRefs = new Map<string, string>();
+  const newBgs: NewBackground[] = [];
   const orig = {
     scenes: new Map(story.scenes.map(({ id, ...s }) => [id, s])),
     choices: new Map(story.choices.map(({ id, ...c }) => [id, c])),
@@ -966,10 +993,24 @@ export function buildProposal(a: ProposeArgs, ctx: AiContext, story: StorySnapsh
     if (ok.length > 6) errs.push(`${where}: mais de 6 personagens no elenco`);
     return JSON.stringify(ok.map(m => ({ c: m.character, s: m.sprite })));
   };
-  const checkBg = (bg: string, where: string) => {
-    if (bg && !bgs.has(bg)) errs.push(`${where}: background "${bg}" não existe (use um id da lista, ou "")`);
+  const checkBg = (raw: string, where: string) => {
+    const bg = bgRefs.get(raw) ?? raw;
+    if (bg && !bgs.has(bg)) errs.push(`${where}: background "${raw}" não existe (use um id da lista, um ref de novos_backgrounds, ou "")`);
     return bgs.has(bg) ? bg : '';
   };
+  for (const b of a.novos_backgrounds ?? []) {
+    const where = `novos_backgrounds "${b.ref || b.nome}"`;
+    const prompt = String(b.prompt ?? '').trim(), name = String(b.nome ?? '').trim();
+    if (!b.ref) { errs.push(`${where}: falta o ref`); continue; }
+    if (bgRefs.has(b.ref) || bgs.has(b.ref)) { errs.push(`${where}: ref "${b.ref}" repetido ou igual a um id existente`); continue; }
+    if (!name) errs.push(`${where}: falta o nome`);
+    if (prompt.split(/\s+/).length < 20) errs.push(`${where}: o prompt precisa descrever o lugar em inglês (60 a 120 palavras)`);
+    const id = newId('b');
+    bgRefs.set(b.ref, id);
+    bgs.add(id);
+    const time = ['day', 'sunset', 'night', 'interior', 'water'].includes(String(b.time)) ? String(b.time) : '';
+    newBgs.push({ id, name: clip(name || 'Background', 80), desc: clip(String(b.descricao ?? '').trim(), 400), prompt: clip(prompt, 1200), time, mood: clip(String(b.mood ?? '').trim(), 120) });
+  }
   // Fala de alguém fora do elenco: entra no elenco com o primeiro sprite, se couber.
   const fixVoice = (s: WScene, where: string) => {
     if (s.kind !== 'dialogue') { s.kind = 'narration'; s.speaker = ''; return; }
@@ -1086,6 +1127,9 @@ export function buildProposal(a: ProposeArgs, ctx: AiContext, story: StorySnapsh
   for (const [id, c] of orig.choices) if (!choices.has(id) && !removed.has(c.sceneId)) ops.push({ op: 'delete_choice', id });
   for (const id of removed) if (orig.scenes.has(id)) ops.push({ op: 'delete_scene', id });
   if (!ops.length) return 'a proposta não mudava nada';
+  const used = new Set([...scenes.values()].map(s => s.bg));
+  const unused = newBgs.filter(b => !used.has(b.id));
+  if (unused.length) return unused.map(b => `novos_backgrounds "${b.name}": nenhuma cena usa este background; ponha o ref dele no bg de alguma cena ou tire-o`).join('; ');
 
   const title = (id: string) => `“${orig.scenes.get(id)?.title ?? scenes.get(id)?.title ?? ''}”`;
   const summary = a.summary?.length ? a.summary : [
@@ -1094,7 +1138,8 @@ export function buildProposal(a: ProposeArgs, ctx: AiContext, story: StorySnapsh
     ...[...removed].filter(id => orig.scenes.has(id)).map(id => `Remover ${title(id)}`),
   ];
   if (!summary.length) summary.push('Religar ações');
-  return { summary, ops, created: [...isNew] };
+  summary.unshift(...newBgs.map(b => `Gerar background “${b.name}”`));
+  return { summary, ops, created: [...isNew], ...(newBgs.length ? { backgrounds: newBgs } : {}) };
 }
 
 // JSON cortado no meio (argumentos da ferramenta chegando aos pedaços): fecha o que estiver aberto

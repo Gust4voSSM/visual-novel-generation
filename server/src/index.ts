@@ -1316,6 +1316,29 @@ export const generate_background = spacetimedb.reducer(
   }
 );
 
+// Background pedido pelo agente do chat (proposta aceita): o prompt já vem escrito, o worker não o melhora.
+export const generate_background_prompted = spacetimedb.reducer(
+  { storyId: t.string(), backgroundId: t.string(), jobId: t.string(), name: t.string(), desc: t.string(), prompt: t.string(), time: t.string(), mood: t.string() },
+  (ctx, { storyId, backgroundId, jobId, name, desc, prompt, time, mood }) => {
+    editorFor(ctx, storyId);
+    if (!validId(backgroundId) || !validId(jobId) || !name.trim() || !prompt.trim()) throw new SenderError('INVALID');
+    const cur = ctx.db.background.id.find(backgroundId);
+    if (cur) {
+      if (cur.storyId === storyId && ctx.db.aiJob.id.find(jobId)) return;
+      throw new SenderError('INVALID');
+    }
+    checkRate(ctx);
+    const b = {
+      id: backgroundId, storyId, name: str(name, 80), desc: str(desc, 2000), imageKey: '', baseKey: '', source: 'ai',
+      status: 'generating', error: '', createdAt: ctx.timestamp,
+    };
+    ctx.db.background.insert(b);
+    insertJob(ctx, jobId, ctx.sender, storyId, 'background', {
+      backgroundId, name: b.name, desc: b.desc, prompt: str(prompt, 1200), time: str(time, 20), mood: str(mood, 120),
+    });
+  }
+);
+
 // Gera de novo: um charsheet (personagem falhado, ou enviado sem charsheet), uma pose ou um background.
 export const retry_generation = spacetimedb.reducer(
   { storyId: t.string(), target: t.string(), id: t.string(), jobId: t.string() },

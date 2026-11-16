@@ -4572,6 +4572,30 @@ function graphProblem(f) {
   return null;
 }
 // Aceitar valida contra o estado atual, que pode ter mudado desde a proposta.
+// Backgrounds novos que o agente pediu na proposta: gerados com o prompt dele (sem a melhoria do fluxo manual).
+// As cenas já apontam para o id; o background aparece no painel como "gerando…" até a imagem chegar.
+function genProposalBackgrounds(p) {
+  const todo = (p.backgrounds || []).filter((b) => !state.backgrounds.some((x) => x.id === b.id));
+  for (const b of todo) {
+    conn.reducers
+      .generateBackgroundPrompted({
+        storyId,
+        backgroundId: b.id,
+        jobId: uid('j'),
+        name: b.name,
+        desc: b.desc || '',
+        prompt: b.prompt,
+        time: b.time || '',
+        mood: b.mood || '',
+      })
+      .then(
+        () => freshCards.set(b.id, performance.now()),
+        (err) => toast(`Não deu para gerar o background “${b.name}”: ${err?.message || err}`, 'err'),
+      );
+  }
+  if (todo.length)
+    toast(todo.length > 1 ? `Gerando ${todo.length} backgrounds` : `Gerando o background “${todo[0].name}”`, 'ai');
+}
 function acceptProposal(p) {
   const f = flatOf(state);
   // As cenas novas caem onde o rascunho mostrou; sem rascunho na tela, o lugar é calculado agora.
@@ -4608,6 +4632,7 @@ function acceptProposal(p) {
   pushUndo();
   applyOps(f, plan.ops);
   writeFlat(f);
+  genProposalBackgrounds(p);
   const now = performance.now(),
     born = [...plan.created].filter((id) => scene(id)),
     gone = [...before.scenes.keys()].filter((id) => !f.scenes.has(id));

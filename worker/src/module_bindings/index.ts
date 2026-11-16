@@ -45,6 +45,7 @@ import CreateStoryReducer from "./create_story_reducer";
 import DeleteStoryReducer from "./delete_story_reducer";
 import FailJobReducer from "./fail_job_reducer";
 import GenerateBackgroundReducer from "./generate_background_reducer";
+import GenerateBackgroundPromptedReducer from "./generate_background_prompted_reducer";
 import GenerateCharacterReducer from "./generate_character_reducer";
 import JoinByLinkReducer from "./join_by_link_reducer";
 import LockFieldReducer from "./lock_field_reducer";
@@ -53,6 +54,7 @@ import PingReducer from "./ping_reducer";
 import PushChatChunkReducer from "./push_chat_chunk_reducer";
 import RegisterWorkerReducer from "./register_worker_reducer";
 import ReleaseFieldReducer from "./release_field_reducer";
+import RemoveCharsheetReducer from "./remove_charsheet_reducer";
 import RemoveMemberReducer from "./remove_member_reducer";
 import RenameStoryReducer from "./rename_story_reducer";
 import RenewFieldLockReducer from "./renew_field_lock_reducer";
@@ -64,6 +66,7 @@ import SetLinkAccessReducer from "./set_link_access_reducer";
 import SetProfileReducer from "./set_profile_reducer";
 import ShareStoryReducer from "./share_story_reducer";
 import UpdateCursorReducer from "./update_cursor_reducer";
+import UploadCharsheetReducer from "./upload_charsheet_reducer";
 
 // Import all procedure arg schemas
 import * as CompleteTextProcedure from "./complete_text_procedure";
@@ -328,6 +331,7 @@ const reducersSchema = __reducers(
   __reducerSchema("delete_story", DeleteStoryReducer),
   __reducerSchema("fail_job", FailJobReducer),
   __reducerSchema("generate_background", GenerateBackgroundReducer),
+  __reducerSchema("generate_background_prompted", GenerateBackgroundPromptedReducer),
   __reducerSchema("generate_character", GenerateCharacterReducer),
   __reducerSchema("join_by_link", JoinByLinkReducer),
   __reducerSchema("lock_field", LockFieldReducer),
@@ -336,6 +340,7 @@ const reducersSchema = __reducers(
   __reducerSchema("push_chat_chunk", PushChatChunkReducer),
   __reducerSchema("register_worker", RegisterWorkerReducer),
   __reducerSchema("release_field", ReleaseFieldReducer),
+  __reducerSchema("remove_charsheet", RemoveCharsheetReducer),
   __reducerSchema("remove_member", RemoveMemberReducer),
   __reducerSchema("rename_story", RenameStoryReducer),
   __reducerSchema("renew_field_lock", RenewFieldLockReducer),
@@ -347,6 +352,7 @@ const reducersSchema = __reducers(
   __reducerSchema("set_profile", SetProfileReducer),
   __reducerSchema("share_story", ShareStoryReducer),
   __reducerSchema("update_cursor", UpdateCursorReducer),
+  __reducerSchema("upload_charsheet", UploadCharsheetReducer),
 );
 
 /** The schema information for all procedures in this module. This is defined the same way as the procedures would have been defined in the server. */
