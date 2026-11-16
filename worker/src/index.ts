@@ -199,6 +199,7 @@ async function runCharacter(input: CharacterInput) {
 
 type BackgroundInput = {
   name: string; desc: string; time?: string; mood?: string;
+  prompt?: string; // prompt já escrito pelo agente do chat: pula a melhoria
   variants?: string[]; // ex.: ['night']: edits da base, mesma composição
   base_key?: string; // base já gerada (image 1536×1024): só as variantes
 };
@@ -215,15 +216,20 @@ async function runBackground(input: BackgroundInput) {
     } else {
       // Fluxo manual: a descrição do autor vira um prompt concreto antes da imagem; se falhar, vai a descrição crua.
       let brief = { scene: `${input.name}: ${input.desc}`, time: input.time ?? '', mood: input.mood ?? '' };
-      try {
+      if (input.prompt?.trim()) {
+        brief = { scene: input.prompt.trim().slice(0, 1200), time: input.time ?? '', mood: input.mood ?? '' };
+        log('background: prompt pronto (agente ou guardado)', JSON.stringify(brief));
+        prompt = brief;
+      } else try {
         const b = await provider!.enhanceBackground({ name: input.name, desc: input.desc }, sig);
         brief = { scene: b.scene, time: input.time || b.time, mood: input.mood || b.mood };
         log('background: prompt melhorado', JSON.stringify(brief));
+        prompt = brief;
       } catch (e) {
         if (sig.aborted) throw e;
+        // Sem prompt no resultado: o servidor não guarda a descrição crua, e regenerar tenta melhorar de novo.
         log('background: melhoria do prompt falhou, usando a descrição', shortError(e));
       }
-      prompt = brief;
       const img = await provider!.image({ kind: 'background', prompt: brief.scene, hint, time: brief.time, mood: brief.mood }, sig);
       image_key = await store.put(img);
       base_key = img.base ? await store.put({ bytes: img.base, contentType: 'image/png' }) : image_key;

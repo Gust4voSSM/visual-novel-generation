@@ -1623,8 +1623,18 @@ function aiContext() {
     })),
     backgrounds: state.backgrounds
       .filter((b) => b.img)
-      .map((b) => ({ id: b.id, name: b.name, desc: b.desc })),
+      .map((b) => ({ id: b.id, name: b.name, desc: b.desc, prompt: bgPromptText(b.prompt) })),
   };
+}
+// Prompt guardado no background (JSON {scene, time, mood}) como uma linha para o chat.
+function bgPromptText(json) {
+  try {
+    const v = JSON.parse(json || 'null');
+    if (!v?.scene) return undefined;
+    return [v.scene, v.time && `time: ${v.time}`, v.mood && `mood: ${v.mood}`].filter(Boolean).join(' | ');
+  } catch {
+    return undefined;
+  }
 }
 const AI_ERRS = {
   AI_DISABLED: 'a IA está desabilitada neste servidor.',
@@ -4634,6 +4644,30 @@ function graphProblem(f) {
   return null;
 }
 // Aceitar valida contra o estado atual, que pode ter mudado desde a proposta.
+// Backgrounds novos que o agente pediu na proposta: gerados com o prompt dele (sem a melhoria do fluxo manual).
+// As cenas já apontam para o id; o background aparece no painel como "gerando…" até a imagem chegar.
+function genProposalBackgrounds(p) {
+  const todo = (p.backgrounds || []).filter((b) => !state.backgrounds.some((x) => x.id === b.id));
+  for (const b of todo) {
+    conn.reducers
+      .generateBackgroundPrompted({
+        storyId,
+        backgroundId: b.id,
+        jobId: uid('j'),
+        name: b.name,
+        desc: b.desc || '',
+        prompt: b.prompt,
+        time: b.time || '',
+        mood: b.mood || '',
+      })
+      .then(
+        () => freshCards.set(b.id, performance.now()),
+        (err) => toast(`Não deu para gerar o background “${b.name}”: ${err?.message || err}`, 'err'),
+      );
+  }
+  if (todo.length)
+    toast(todo.length > 1 ? `Gerando ${todo.length} backgrounds` : `Gerando o background “${todo[0].name}”`, 'ai');
+}
 function acceptProposal(p) {
   const f = flatOf(state);
   // As cenas novas caem onde o rascunho mostrou; sem rascunho na tela, o lugar é calculado agora.
@@ -4666,7 +4700,7 @@ function acceptProposal(p) {
     return false;
   }
   if (draft && draft.p === p) clearDraft();
-  // Personagens novos primeiro: as linhas nascem já (gerando) e as cenas abaixo usam os ids deles.
+  // Personagens novos (sempre numa proposta só deles): as linhas nascem já, gerando.
   // Reenvio do mesmo personagem é ignorado pelo módulo; os pedidos saem em ordem pela mesma conexão.
   for (const c of p.characters || []) {
     if (conn.db.curCharacter.id.find(c.id)) continue;
@@ -4692,6 +4726,7 @@ function acceptProposal(p) {
   pushUndo();
   applyOps(f, plan.ops);
   writeFlat(f);
+  genProposalBackgrounds(p);
   const now = performance.now(),
     born = [...plan.created].filter((id) => scene(id)),
     gone = [...before.scenes.keys()].filter((id) => !f.scenes.has(id));
@@ -5292,6 +5327,7 @@ function writeCast(f) {
       img: imgUrl(v.imageKey),
       status: r?.status || '',
       error: r?.error || '',
+      prompt: r?.prompt || '',
     });
     return b;
   });
