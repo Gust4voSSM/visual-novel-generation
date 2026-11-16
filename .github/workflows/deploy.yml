@@ -78,7 +78,7 @@ jobs:
           [ -n "$AI_PROVIDER" ] || unset AI_PROVIDER
           [ -n "$AI_RATE_PER_MIN" ] || unset AI_RATE_PER_MIN
           [ -n "$WORKER_SECRET" ] || unset WORKER_SECRET
-          spacetime publish -s maincloud -p server --yes=remote,migrate,skip-login,delete-data --delete-data=on-conflict "$STDB_DB"
+          spacetime publish -s maincloud -p server --yes=remote,migrate,skip-login,delete-data,break-clients --delete-data=on-conflict "$STDB_DB"
 
   # Marca o commit publicado para o worker da VM (worker/deploy/update.sh segue esta branch).
   # Fica num job à parte para só ele ter permissão de escrita no repositório.
