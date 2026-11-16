@@ -28,7 +28,7 @@ export const COMPARE_PATHS = env.AI_IMAGE_COMPARE_PATHS === '1';
 // Modelo do caminho nativo (background: "transparent"). O gpt-image-2 recusa transparência com
 // HTTP 400 "Transparent background is not supported for this model" (visto em 2026-11-14).
 export const NATIVE_MODEL = env.OPENAI_IMAGE_MODEL_NATIVE ?? '';
-export const IMAGE_QUALITY = env.OPENAI_IMAGE_QUALITY ?? 'low';
+export const IMAGE_QUALITY = env.OPENAI_IMAGE_QUALITY ?? 'medium';
 export const ART_STYLE = env.AI_ART_STYLE ?? 'Clean stylized 2D anime visual novel art, crisp dark linework, flat cel shading, consistent proportions.';
 const SPRITE_SIZE = '1024x1536', BG_SIZE = '1536x1024';
 // Palco do player: 16:9 (client/index.html, .stage e .play .pic com aspect-ratio:16/9; o fundo usa object-fit:cover).

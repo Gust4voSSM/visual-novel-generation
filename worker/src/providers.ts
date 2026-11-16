@@ -69,7 +69,12 @@ export interface AiProvider {
   scene(input: SceneInput, story: StorySnapshot, signal: AbortSignal): Promise<SuggestedScene>;
   complete(input: CompleteInput, story: StorySnapshot, signal: AbortSignal): Promise<{ text: string }>;
   option(input: OptionInput, story: StorySnapshot, signal: AbortSignal): Promise<{ label: string }>;
+  /** Reescreve a descrição livre do autor como um prompt de background consistente (em inglês). */
+  enhanceBackground(input: { name: string; desc: string }, signal: AbortSignal): Promise<BackgroundBrief>;
 }
+
+// Prompt melhorado de background: cena (só o lugar, sem estilo), hora do dia e clima.
+export type BackgroundBrief = { scene: string; time: string; mood: string };
 
 export function createProvider(name: string | undefined): AiProvider | null {
   if (name === 'mock') return new MockProvider();
@@ -118,6 +123,12 @@ const IMAGE_MS = Number(process.env.MOCK_IMAGE_MS ?? '700');
 
 class MockProvider implements AiProvider {
   readonly name = 'mock';
+
+  async enhanceBackground(input: { name: string; desc: string }, signal: AbortSignal): Promise<BackgroundBrief> {
+    await sleep(200, signal);
+    const k = backgroundKind(input.name + ' ' + input.desc);
+    return { scene: `${input.name}. ${input.desc}`.trim(), time: k === 'night' ? 'night' : '', mood: '' };
+  }
 
   async chat(input: ChatInput, story: StorySnapshot, onText: (t: string) => void, signal: AbortSignal): Promise<ChatResult> {
     const fail = /#falha/i.test(input.message);
@@ -287,8 +298,8 @@ const OPENAI_URL = 'https://api.openai.com/v1';
 // gpt-5.5), foi o mais rápido (1º texto em ~1 s, resposta em ~3 s) com propostas válidas e boa qualidade.
 const CHAT_MODEL = process.env.OPENAI_CHAT_MODEL ?? 'gpt-6-luna';
 const REASONING_EFFORT = process.env.OPENAI_REASONING_EFFORT ?? (/^(gpt-[56]|o\d)/.test(CHAT_MODEL) ? 'low' : undefined);
-const IMAGE_MODEL = process.env.OPENAI_IMAGE_MODEL ?? 'gpt-image-2';
-const IMAGE_QUALITY = process.env.OPENAI_IMAGE_QUALITY ?? 'low'; // low | medium | high
+const IMAGE_MODEL = process.env.OPENAI_IMAGE_MODEL ?? 'gpt-image-2.6-flare';
+const IMAGE_QUALITY = process.env.OPENAI_IMAGE_QUALITY ?? 'medium'; // low | medium | high
 const clip = (s: string, n: number) => (s.length > n ? s.slice(0, n) + '…' : s);
 // Preço por 1M de tokens (US$) para o custo no modo experimento. Sem os três, o custo fica null
 // e o meta.json guarda só o usage da resposta.
@@ -694,6 +705,14 @@ class OpenAiProvider implements AiProvider {
     }
   }
 
+  async enhanceBackground(input: { name: string; desc: string }, signal: AbortSignal): Promise<BackgroundBrief> {
+    const out = await this.json<BackgroundBrief>('background', BG_SCHEMA, BG_ENHANCER,
+      `Name: ${clip(input.name, 80)}\nDescription: ${clip(input.desc, 1500) || '(none)'}`, signal);
+    const scene = String(out.scene ?? '').trim();
+    if (!scene) throw new Error('AI_INVALID_OUTPUT');
+    return { scene: clip(scene, 1200), time: clip(String(out.time ?? '').trim(), 60), mood: clip(String(out.mood ?? '').trim(), 120) };
+  }
+
   async scene(input: SceneInput, story: StorySnapshot, signal: AbortSignal): Promise<SuggestedScene> {
     const src = story.scenes.find(s => s.id === input.sourceSceneId);
     if (!src) throw new Error('NOT_FOUND');
@@ -808,6 +827,21 @@ const TEXT_SCHEMA = {
   type: 'object', additionalProperties: false, required: ['mode', 'text'],
   properties: { mode: { type: 'string', enum: ['continue', 'rewrite'] }, text: { type: 'string' } },
 };
+const BG_SCHEMA = {
+  type: 'object', additionalProperties: false, required: ['scene', 'time', 'mood'],
+  properties: { scene: { type: 'string' }, time: { type: 'string' }, mood: { type: 'string' } },
+};
+// O estilo e as restrições fixas (sem pessoas, chão livre etc.) ficam no template do pipeline;
+// aqui só o lugar, descrito de forma concreta, para que todo background saia no mesmo estilo anime.
+const BG_ENHANCER = `You write image prompts for background art of an anime visual novel. The author gives a name and a short description, often in Portuguese.
+Return JSON:
+- scene: one English paragraph (60-120 words) describing ONLY the place: setting, architecture or terrain, key objects, materials,
+  colour palette, depth (foreground / midground / background layers) and where the light comes from. Concrete visual nouns, no story events.
+  Keep everything the author asked for and invent only plausible details that fit it. Keep the lower-centre ground open and uncluttered.
+  Do NOT mention art style, medium, artists, camera brands, resolution or quality tags (the style is added separately).
+  Never include people, characters, animals in focus, text, signs with writing, logos or UI.
+- time: one of "day", "sunset", "night", "interior", "water", or "" if the author did not imply one.
+- mood: a few English words for the atmosphere (e.g. "calm, nostalgic"), or "".`;
 const OPTION_SCHEMA = { type: 'object', additionalProperties: false, required: ['label'], properties: { label: { type: 'string' } } };
 
 function systemPrompt(ctx: AiContext, story: StorySnapshot): string {

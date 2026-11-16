@@ -205,12 +205,23 @@ async function runBackground(input: BackgroundInput) {
   const variants = Array.isArray(input.variants) ? input.variants.slice(0, 4).map(String) : [];
   return withTimeout(TIMEOUT.background, async sig => {
     const hint = input.name + ' ' + input.desc;
-    let image_key = '', base_key = input.base_key ?? '', baseBytes: Uint8Array | undefined;
+    let image_key = '', base_key = input.base_key ?? '', baseBytes: Uint8Array | undefined, prompt: { scene: string; time: string; mood: string } | null = null;
     if (base_key) {
       baseBytes = (await store.get(base_key)) ?? undefined;
       if (!baseBytes && !base_key.startsWith('placeholders/')) throw new Error('INVALID_INPUT');
     } else {
-      const img = await provider!.image({ kind: 'background', prompt: `${input.name}: ${input.desc}`, hint, time: input.time, mood: input.mood }, sig);
+      // Fluxo manual: a descrição do autor vira um prompt concreto antes da imagem; se falhar, vai a descrição crua.
+      let brief = { scene: `${input.name}: ${input.desc}`, time: input.time ?? '', mood: input.mood ?? '' };
+      try {
+        const b = await provider!.enhanceBackground({ name: input.name, desc: input.desc }, sig);
+        brief = { scene: b.scene, time: input.time || b.time, mood: input.mood || b.mood };
+        log('background: prompt melhorado', JSON.stringify(brief));
+      } catch (e) {
+        if (sig.aborted) throw e;
+        log('background: melhoria do prompt falhou, usando a descrição', shortError(e));
+      }
+      prompt = brief;
+      const img = await provider!.image({ kind: 'background', prompt: brief.scene, hint, time: brief.time, mood: brief.mood }, sig);
       image_key = await store.put(img);
       base_key = img.base ? await store.put({ bytes: img.base, contentType: 'image/png' }) : image_key;
       baseBytes = img.base;
@@ -220,7 +231,7 @@ async function runBackground(input: BackgroundInput) {
       const img = await provider!.image({ kind: 'background-variant', base: { id: base_key, bytes: baseBytes }, variant: v, hint: v }, sig);
       out.push({ name: v, image_key: await store.put(img) });
     }
-    return { image_key: image_key || out[0]?.image_key || '', base_key, ...(variants.length ? { variants: out } : {}) };
+    return { image_key: image_key || out[0]?.image_key || '', base_key, ...(prompt ? { prompt } : {}), ...(variants.length ? { variants: out } : {}) };
   });
 }
 

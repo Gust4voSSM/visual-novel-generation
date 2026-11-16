@@ -2813,7 +2813,7 @@ function renderRail() {
           .map((b) => {
             const o = openCards.has(b.id);
             return `<div class="card${cardFresh(b.id, b.source)}" data-b="${b.id}"><div class="card-row" data-toggle>${artOf(b, 'bg-thumb')}<div style="min-width:0;flex:1"><div class="card-name"><span>${esc(b.name)}</span></div><div class="card-sub">${busy(b) ? 'gerando…' : b.status === 'failed' ? 'falhou' : usage('bg', b.id).length + ' cena(s)'}${b.source === 'marketplace' ? ' · marketplace' : b.source === 'ai' ? ' · gerado por IA' : ''}</div></div><span class="chev">${o ? '−' : '+'}</span></div>
-      ${o ? `<div class="card-edit">${b.img ? `<img src="${esc(b.img)}" alt="" style="width:100%;border-radius:8px;aspect-ratio:16/9;object-fit:cover">` : ''}${genLine(b, 'o background', 'b:' + b.id)}<label class="field"><span class="lbl">nome</span><input class="inp" data-bf="name" value="${esc(b.name)}"></label><label class="field"><span class="lbl">descrição</span><textarea class="inp" data-bf="desc">${esc(b.desc)}</textarea></label><label class="addbtn" style="align-self:flex-start;display:inline-flex;align-items:center">${b.img ? 'trocar imagem' : 'enviar imagem'}<input type="file" accept="image/png,image/jpeg,image/webp" data-upbg hidden></label><div class="row"><button class="btn sm" data-pub>Publicar no marketplace</button><button class="btn sm danger" data-bdel>Excluir</button></div></div>` : ''}</div>`;
+      ${o ? `<div class="card-edit">${b.img ? `<img src="${esc(b.img)}" alt="Ampliar ${esc(b.name)}" data-zoom title="Ampliar" style="width:100%;border-radius:8px;aspect-ratio:16/9;object-fit:cover">` : ''}${genLine(b, 'o background', 'b:' + b.id)}<label class="field"><span class="lbl">nome</span><input class="inp" data-bf="name" value="${esc(b.name)}"></label><label class="field"><span class="lbl">descrição</span><textarea class="inp" data-bf="desc">${esc(b.desc)}</textarea></label><label class="addbtn" style="align-self:flex-start;display:inline-flex;align-items:center">${b.img ? 'trocar imagem' : 'enviar imagem'}<input type="file" accept="image/png,image/jpeg,image/webp" data-upbg hidden></label><div class="row"><button class="btn sm" data-pub>Publicar no marketplace</button><button class="btn sm danger" data-bdel>Excluir</button></div></div>` : ''}</div>`;
           })
           .join('')
       : '<div class="empty">Nenhum background. Envie uma imagem, gere com IA ou copie do Marketplace.</div>';
@@ -2940,6 +2940,13 @@ onCast('click', (e) => {
     editChar = null;
     renderRail();
     return;
+  }
+  if (bid && e.target.closest('img[data-zoom],img.bg-thumb')) {
+    const b = state.backgrounds.find((x) => x.id === bid);
+    if (b?.img) {
+      bgViewer(b);
+      return;
+    }
   }
   if (e.target.closest('[data-toggle]')) {
     if (cid) {
@@ -3690,6 +3697,61 @@ function modal(html, cls) {
   if (f) f.focus();
   return w;
 }
+// Background em tamanho grande; clicar na imagem alterna entre caber na tela e 100% (arrastando para mover).
+function bgViewer(b) {
+  const w = modal(
+    `<div class="modal-head"><h2>${esc(b.name)}</h2><span class="hint" id="bvSize"></span><button class="iconbtn" data-close aria-label="Fechar">${X}</button></div>
+  <div class="bv-stage" id="bvStage"><img src="${esc(b.img)}" alt="${esc(b.name)}" draggable="false"></div>
+  <div class="modal-foot"><span class="hint" style="margin-right:auto">${b.desc ? esc(b.desc) : 'Clique na imagem para ver em 100% e arraste para mover.'}</span><button class="btn" data-close>Fechar</button></div>`,
+    'viewer',
+  );
+  const st = w.querySelector('#bvStage'),
+    img = st.querySelector('img');
+  // 100% só ajuda quando a imagem é maior que a área em que ela cabe.
+  const big = () => img.naturalWidth > st.clientWidth + 1 || img.naturalHeight > img.clientHeight + 1;
+  const ready = () => {
+    w.querySelector('#bvSize').textContent = `${img.naturalWidth}×${img.naturalHeight}`;
+    st.classList.toggle('zoomable', big());
+  };
+  img.addEventListener('load', ready);
+  if (img.complete && img.naturalWidth) ready();
+  let drag = null,
+    moved = false;
+  st.addEventListener('pointerdown', (e) => {
+    if (!st.classList.contains('full')) return;
+    drag = { x: e.clientX, y: e.clientY, l: st.scrollLeft, t: st.scrollTop };
+    moved = false;
+    st.setPointerCapture(e.pointerId);
+  });
+  st.addEventListener('pointermove', (e) => {
+    if (!drag) return;
+    const dx = e.clientX - drag.x,
+      dy = e.clientY - drag.y;
+    if (Math.abs(dx) + Math.abs(dy) > 3) moved = true;
+    st.scrollLeft = drag.l - dx;
+    st.scrollTop = drag.t - dy;
+  });
+  st.addEventListener('pointerup', () => {
+    drag = null;
+  });
+  img.addEventListener('click', (e) => {
+    if (moved) {
+      moved = false;
+      return;
+    }
+    if (st.classList.contains('full')) {
+      st.classList.remove('full');
+      return;
+    }
+    if (!big()) return;
+    const r = img.getBoundingClientRect(),
+      fx = (e.clientX - r.left) / r.width,
+      fy = (e.clientY - r.top) / r.height;
+    st.classList.add('full');
+    st.scrollLeft = fx * img.naturalWidth - st.clientWidth / 2;
+    st.scrollTop = fy * img.naturalHeight - st.clientHeight / 2;
+  });
+}
 function closeModal() {
   const m = document.querySelector('.modal-wrap');
   if (m) {
@@ -3880,7 +3942,7 @@ function genBgModal() {
   if (!storyId) return;
   const w = modal(
     `<div class="modal-head"><h2>Gerar background com IA</h2><span class="tag ai">${SPARK}IA</span><button class="iconbtn" data-close aria-label="Fechar">${X}</button></div>
-  <div class="modal-body"><label class="field"><span class="lbl">nome</span><input class="inp" id="gbName" value="Floresta do manguezal"></label><label class="field"><span class="lbl">descrição</span><textarea class="inp" id="gbDesc">Mata fechada perto do mangue, fim de tarde, raízes aparentes e luz filtrada entre as árvores.</textarea></label><div class="hint">O background aparece no painel e fica pronto em seguida; dá para seguir editando.</div></div>
+  <div class="modal-body"><label class="field"><span class="lbl">nome</span><input class="inp" id="gbName" value="Floresta do manguezal"></label><label class="field"><span class="lbl">descrição</span><textarea class="inp" id="gbDesc">Mata fechada perto do mangue, fim de tarde, raízes aparentes e luz filtrada entre as árvores.</textarea></label><div class="hint">Descreva o lugar com suas palavras: a IA detalha a descrição num prompt no estilo anime da história (sem personagens, com espaço no chão para os sprites) antes de gerar. O background aparece no painel; dá para seguir editando.</div></div>
   <div class="modal-foot"><button class="btn" data-close>Cancelar</button><button class="btn violet solid" id="gbGo">${SPARK13()}Gerar background</button></div>`,
     'narrow ai-glow',
   );
