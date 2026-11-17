@@ -1481,11 +1481,11 @@ const norm = (s: string) => (s || '').toLowerCase().normalize('NFD').replace(/[Ì
 
 function mockSprite(ctx: PCtx, sprites: { id: string; name: string; desc?: string }[], mood: string) {
   const want = mood === 'tense' ? ['surpre', 'brav', 'trist', 'pensat'] : ['feliz', 'sorri', 'neutro'];
-  return (sprites.find(s => want.some(w => norm(s.name + ' ' + (s.desc ?? '')).includes(w))) ?? pickOf(ctx, sprites)).id;
+  return (sprites.find(s => want.some(w => norm(s.name + ' ' + (s.desc ?? '')).includes(w))) ?? pickOf(ctx, sprites))?.id ?? '';
 }
 
 function mockScene(ctx: PCtx, src: { title: string; text: string; bg: string } | undefined, label: string, instruction: string, cx: AiContext) {
-  const pool = cx.characters.filter(c => c.sprites.length);
+  const pool = cx.characters;
   const mood = /tens|medo|susp|briga/.test(norm(instruction)) ? 'tense' : ctx.random() < 0.5 ? 'tense' : 'warm';
   const cast = ctx.random.shuffle([...pool]).slice(0, Math.min(pool.length, 1 + Math.floor(ctx.random() * 3)));
   const bgIds = new Set(cx.backgrounds.map(b => b.id));
@@ -1520,7 +1520,8 @@ function checkSuggested(s: ReturnType<typeof mockScene>, cx: AiContext) {
   if (new Set(s.characters.map(c => c.character_id)).size !== s.characters.length) throw new SenderError('AI_INVALID_OUTPUT');
   for (const c of s.characters) {
     const ch = chars.get(c.character_id);
-    if (!ch || !ch.sprites.some(sp => sp.id === c.sprite_id)) throw new SenderError('AI_INVALID_OUTPUT');
+    // sprite "": o personagem estÃ¡ na cena (pode falar), mas sem imagem.
+    if (!ch || (c.sprite_id !== '' && !ch.sprites.some(sp => sp.id === c.sprite_id))) throw new SenderError('AI_INVALID_OUTPUT');
   }
   if (s.text_kind === 'dialogue' && !s.characters.some(c => c.character_id === s.speaker_character_id)) throw new SenderError('AI_INVALID_OUTPUT');
 }

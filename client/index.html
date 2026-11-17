@@ -257,11 +257,15 @@ body.chardrag,body.chardrag *{cursor:grabbing!important;user-select:none}
 .cb-sp img{width:40px;height:42px;object-fit:cover;object-position:top}
 .cb-sp span{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .cb-sp[aria-pressed="true"]{border-color:var(--amber);color:var(--text);box-shadow:0 0 0 1px var(--amber)}
+.cb-sp.none img,.avatar.nosprite{object-fit:contain;object-position:center bottom;opacity:.85}
+.cb-off{display:flex;flex-wrap:wrap;align-items:center;gap:5px;margin:2px 0 6px}
+.spk-chip.off{padding:0 3px 0 9px;gap:2px}
+.spk-chip.off button{background:none;border:0;color:inherit;font:inherit;padding:0 2px;cursor:pointer}
 .castempty{border:1px dashed var(--line-3);border-radius:7px;padding:10px;text-align:center;font-size:12px;color:var(--faint)}
 .spk{display:flex;gap:5px;flex-wrap:wrap;min-width:0}
 .spk-chip{display:inline-flex;align-items:center;gap:5px;height:26px;padding:0 9px 0 3px;border-radius:13px;border:1px solid var(--line);background:var(--well);color:var(--text-2);font-size:12px}
 .spk-chip img{width:20px;height:20px;border-radius:50%;object-fit:cover;object-position:top;background:var(--surface-2)}
-.spk-chip[aria-pressed="true"]{border-color:var(--cc);color:var(--cc);background:color-mix(in srgb,var(--cc) 14%,transparent)}
+.spk-chip[aria-pressed="true"],.spk-chip.off[data-selected="true"]{border-color:var(--cc);color:var(--cc);background:color-mix(in srgb,var(--cc) 14%,transparent)}
 .card[data-c] .card-row,.card[data-c] .sprite img{-webkit-user-drag:none;user-select:none}
 .card[data-c] .avatar,.card[data-c] .sprite img{touch-action:none;cursor:grab}
 .reveal .bgimg{animation:bgin .6s ease-out both}

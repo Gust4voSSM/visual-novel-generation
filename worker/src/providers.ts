@@ -166,14 +166,14 @@ class MockProvider implements AiProvider {
     const label = story.choices.find(c => c.id === input.choiceId)?.label ?? '';
     const cx = input.context;
     const tense = /tens|medo|susp|briga/.test(norm(input.instruction)) || Math.random() < 0.5;
-    const pool = cx.characters.filter(c => c.sprites.length);
+    const pool = cx.characters;
     const cast = [...pool].sort(() => Math.random() - 0.5).slice(0, Math.min(pool.length, 1 + Math.floor(Math.random() * 3)));
     const bg = src?.bg && cx.backgrounds.some(b => b.id === src.bg) && Math.random() < 0.5 ? src.bg : cx.backgrounds.length ? pick(cx.backgrounds).id : '';
     const bgName = cx.backgrounds.find(b => b.id === bg)?.name ?? '';
     const dialogue = cast.length > 0 && Math.random() < 0.7;
     const speaker = dialogue ? pick(cast) : null;
     const want = tense ? ['surpre', 'brav', 'trist', 'pensat'] : ['feliz', 'sorri', 'neutro'];
-    const sprite = (c: (typeof cast)[number]) => (c.sprites.find(s => want.some(w => norm(s.name + ' ' + (s.desc ?? '')).includes(w))) ?? pick(c.sprites)).id;
+    const sprite = (c: (typeof cast)[number]) => (c.sprites.find(s => want.some(w => norm(s.name + ' ' + (s.desc ?? '')).includes(w))) ?? pick(c.sprites))?.id ?? '';
     const lines = tense
       ? ['Você também ouviu isso? Veio de perto do farol.', 'Não era pra ninguém saber disso… quem te contou?', 'Espera. Tem alguma coisa errada aqui.']
       : ['Que bom que você veio. Eu estava te esperando.', 'Vamos, antes que escureça de vez.', 'Lembra quando a gente vinha aqui todo fim de tarde?'];
@@ -242,12 +242,12 @@ class MockProvider implements AiProvider {
     // "crie 4 cenas": uma sequência a partir da saída livre, montada como a ferramenta da OpenAI.
     const many = Number(/(\d+)\s*cenas/.exec(asked)?.[1] ?? 0);
     if (many > 1) {
-      const pool = input.context.characters.filter(c => c.sprites.length);
+      const pool = input.context.characters;
       const criar = Array.from({ length: many }, (_, i) => {
         const who = pool.length ? pick(pool) : null;
         return {
           ref: 'n' + i, title: `Parte ${i + 1}`, bg: input.context.backgrounds[i % Math.max(1, input.context.backgrounds.length)]?.id ?? '',
-          cast: who ? [{ character: who.id, sprite: who.sprites[0].id }] : [], kind: who ? 'dialogue' : 'narration', speaker: who?.id ?? '',
+          cast: who ? [{ character: who.id, sprite: who.sprites[0]?.id ?? '' }] : [], kind: who ? 'dialogue' : 'narration', speaker: who?.id ?? '',
           text: pick(['A maré sobe devagar.', 'Ninguém responde.', 'Você ouviu isso?', 'O farol pisca uma vez.']),
         };
       });
@@ -258,7 +258,7 @@ class MockProvider implements AiProvider {
       const p = buildProposal({ resposta: '', criar, ligar }, input.context, story);
       if (typeof p !== 'string') return { content: intro + `Proponho ${many} cenas seguidas a partir de “${src.title}”. Revise no canvas antes de aceitar.`, proposals: [p] };
     }
-    const pool = input.context.characters.filter(c => c.sprites.length);
+    const pool = input.context.characters;
     const cast = [...pool].sort(() => Math.random() - 0.5).slice(0, Math.min(pool.length, 1 + Math.floor(Math.random() * 2)));
     const bg = src.bg && input.context.backgrounds.some(b => b.id === src.bg) ? src.bg : input.context.backgrounds[0]?.id ?? '';
     const dialogue = cast.length > 0 && Math.random() < 0.7;
@@ -279,7 +279,7 @@ class MockProvider implements AiProvider {
       op: 'upsert_scene',
       scene: {
         id: sceneId, title, x: Math.round(src.x + 380), y: Math.round(src.y + 40), bg,
-        chars: JSON.stringify(cast.map(c => ({ c: c.id, s: c.sprites[Math.floor(Math.random() * c.sprites.length)].id }))),
+        chars: JSON.stringify(cast.map(c => ({ c: c.id, s: pick(c.sprites)?.id ?? '' }))),
         kind: dialogue ? 'dialogue' : 'narration', speaker: speaker?.id ?? '', text, next: '', ai: '',
       },
     });
@@ -408,7 +408,7 @@ const CAST_SCHEMA = {
   type: 'array', maxItems: 6, description: 'Elenco em cena (no máximo 6, sem repetir personagem).',
   items: {
     type: 'object', additionalProperties: false, required: ['character', 'sprite'],
-    properties: { character: { type: 'string', description: 'id do personagem' }, sprite: { type: 'string', description: 'id do sprite' } },
+    properties: { character: { type: 'string', description: 'id do personagem' }, sprite: { type: 'string', description: 'id do sprite, ou "" quando o personagem está na cena sem aparecer no palco (pode falar; personagem sem sprites só tem essa opção)' } },
   },
 } as const;
 const SCENE_PROPS = {
@@ -787,7 +787,7 @@ class OpenAiProvider implements AiProvider {
     const exit = ch ? `a ação "${ch.label || '(ainda sem rótulo)'}" da cena "${src.title}"` : `a saída única da cena "${src.title}"`;
     const out = await this.json<SuggestedScene>('cena_sugerida', SCENE_SCHEMA, `${COAUTHOR}
 Escreva uma única cena nova, curta, que continua a história. Use somente ids que aparecem abaixo.
-Personagens só entram com um sprite deles; em dialogue, quem fala precisa estar na cena. body tem 1 a 3 frases.
+Personagens entram com um sprite deles, ou com sprite_id "" quando estão na cena sem aparecer; em dialogue, quem fala precisa estar na cena. body tem 1 a 3 frases.
 ${TEXT_RULES}
 action_label é um rótulo curto (até 6 palavras) para a ação que leva a esta cena.
 
@@ -795,7 +795,7 @@ ${storyBrief(input.context, story)}`, `A cena nova vem depois de ${exit}.${input
     // Descarta o que não existe no contexto em vez de recusar a cena inteira.
     const chars = new Map(input.context.characters.map(c => [c.id, new Set(c.sprites.map(s => s.id))]));
     const seen = new Set<string>();
-    const cast = (out.characters ?? []).filter(m => chars.get(m.character_id)?.has(m.sprite_id) && !seen.has(m.character_id) && seen.add(m.character_id)).slice(0, 6);
+    const cast = (out.characters ?? []).filter(m => (m.sprite_id === '' ? chars.has(m.character_id) : chars.get(m.character_id)?.has(m.sprite_id)) && !seen.has(m.character_id) && seen.add(m.character_id)).slice(0, 6);
     const dialogue = out.text_kind === 'dialogue' && cast.some(m => m.character_id === out.speaker_character_id);
     return {
       title: clip(out.title || 'Nova cena', 80),
@@ -915,7 +915,7 @@ const SCENE_SCHEMA = {
     background_id: { type: 'string', description: 'id de um background, ou "".' },
     characters: {
       type: 'array',
-      items: { type: 'object', additionalProperties: false, required: ['character_id', 'sprite_id'], properties: { character_id: { type: 'string' }, sprite_id: { type: 'string' } } },
+      items: { type: 'object', additionalProperties: false, required: ['character_id', 'sprite_id'], properties: { character_id: { type: 'string' }, sprite_id: { type: 'string', description: 'id do sprite, ou "" quando o personagem está na cena sem aparecer no palco (pode falar; personagem sem sprites só tem essa opção)' } } },
     },
     text_kind: { type: 'string', enum: ['narration', 'dialogue'] },
     speaker_character_id: { type: 'string', description: 'id de quem fala (dialogue), ou "".' },
@@ -951,7 +951,9 @@ Regras do grafo, que a proposta precisa respeitar depois de aplicada:
 - uma cena tem ações ou uma saída única (próxima), nunca as duas; sem nenhuma das duas, é um final;
 - o grafo não pode ter ciclos;
 - a cena [INÍCIO] não pode ser removida;
-- em fala (dialogue), quem fala precisa estar no elenco da cena; no máximo 6 personagens por cena.
+- em fala (dialogue), quem fala precisa estar no elenco da cena; no máximo 6 personagens por cena;
+- um personagem pode estar no elenco sem pose (sprite ""): fala e está presente, mas não aparece no palco. Use isso
+  para quem fala sem ser visto (ex.: o protagonista) e para personagens sem sprites; nunca dê a fala dele a outro.
 ${TEXT_RULES}
 ${CHARACTER_RULES}
 Para seguir de uma cena, ligue a saída única dela (choice "next") ou crie uma ação nova (choice ""). Ao criar uma
@@ -974,12 +976,12 @@ function storyBrief(ctx: AiContext, story: StorySnapshot): string {
   const scenes = story.scenes.map(s => {
     const ch = choicesOf(s.id).map(c => `    - ação ${c.id} "${c.label}" → ${c.target || '(sem destino)'}`).join('\n');
     const tags = (s.id === story.startScene ? ' [INÍCIO]' : '') + (!s.next && !ch ? ' [FINAL]' : '');
-    const cast = parseCast(s.chars).map(m => `${m.c}/${m.s}`).join(', ') || '-';
+    const cast = parseCast(s.chars).map(m => `${m.c}/${m.s || '""'}${names.has(m.c) ? ` (${names.get(m.c)}${m.s ? '' : ', fora do palco'})` : ''}`).join(', ') || '-';
     const voice = s.kind === 'dialogue' ? `fala de ${s.speaker}${names.has(s.speaker) ? ` (${names.get(s.speaker)})` : ''}` : 'narração';
     return `- cena ${s.id} "${s.title}"${tags} bg=${s.bg || '-'} elenco=${cast} próxima=${s.next || '-'}\n  ${voice}: ${clip(s.text.replace(/\s+/g, ' '), 800)}${ch ? '\n' + ch : ''}`;
   }).join('\n');
   const chars = ctx.characters.map(c =>
-    `- personagem ${c.id} "${c.name}"${c.desc ? ': ' + clip(c.desc, 160) : ''}\n  sprites: ${c.sprites.map(s => `${s.id} (${s.name})`).join(', ') || 'nenhum'}`).join('\n');
+    `- personagem ${c.id} "${c.name}"${c.desc ? ': ' + clip(c.desc, 160) : ''}\n  sprites: ${c.sprites.map(s => `${s.id} (${s.name})`).join(', ') || 'nenhum (entra nas cenas com sprite "", sem aparecer)'}`).join('\n');
   // Prompt de cada background (o que a imagem mostra), para decidir se serve e combinar backgrounds vizinhos.
   // Inteiro (~150 tokens) até 12 backgrounds; acima disso, só o começo.
   const room = ctx.backgrounds.length > 12 ? 300 : 1200;
@@ -1091,7 +1093,7 @@ export function buildProposal(a: ProposeArgs, ctx: AiContext, story: StorySnapsh
     const seen = new Set<string>();
     const ok = (cast ?? []).filter(m => {
       if (!sprites.has(m.character)) { errs.push(`${where}: personagem "${m.character}" não existe`); return false; }
-      if (!sprites.get(m.character)!.includes(m.sprite)) { errs.push(`${where}: sprite "${m.sprite}" não é do personagem "${m.character}"`); return false; }
+      if (m.sprite !== '' && !sprites.get(m.character)!.includes(m.sprite)) { errs.push(`${where}: sprite "${m.sprite}" não é do personagem "${m.character}"`); return false; }
       if (seen.has(m.character)) { errs.push(`${where}: personagem "${m.character}" repetido no elenco`); return false; }
       seen.add(m.character);
       return true;
@@ -1117,14 +1119,14 @@ export function buildProposal(a: ProposeArgs, ctx: AiContext, story: StorySnapsh
     const time = ['day', 'sunset', 'night', 'interior', 'water'].includes(String(b.time)) ? String(b.time) : '';
     newBgs.push({ id, name: clip(name || 'Background', 80), desc: clip(String(b.descricao ?? '').trim(), 400), prompt: clip(prompt, 1200), time, mood: clip(String(b.mood ?? '').trim(), 120) });
   }
-  // Fala de alguém fora do elenco: entra no elenco com o primeiro sprite, se couber.
+  // Fala de alguém fora do elenco: entra no elenco com o primeiro sprite (ou sem pose, se não tem), se couber.
   const fixVoice = (s: WScene, where: string) => {
     if (s.kind !== 'dialogue') { s.kind = 'narration'; s.speaker = ''; return; }
     if (!sprites.has(s.speaker)) { errs.push(`${where}: kind "dialogue" precisa de speaker com o id de um personagem (veio "${s.speaker}")`); return; }
     const cast = parseCast(s.chars);
     if (cast.some(m => m.c === s.speaker)) return;
     const first = sprites.get(s.speaker)![0];
-    if (first && cast.length < 6) s.chars = JSON.stringify([...cast, { c: s.speaker, s: first }]);
+    if (cast.length < 6) s.chars = JSON.stringify([...cast, { c: s.speaker, s: first ?? '' }]);
     else errs.push(`${where}: quem fala ("${s.speaker}") precisa estar no elenco`);
   };
   const checkSpeech = (s: WScene, where: string) => {
