@@ -760,15 +760,21 @@ function stageMini(s) {
   }
   return `<div class="stage-mini${rvOn ? ' reveal' : ''}" data-stage="${s.id}">${h}<div class="stage-frame">${ch}</div></div>`;
 }
-function rowFresh(id) {
-  const t = freshRows.get(id);
-  if (t == null) return '';
+// Há quanto tempo (ms) o item entrou em `map`; null se não entrou ou se já passou de `max`
+// (aí ele sai do mapa). Usado pelo destaque "fresh" de linhas e cards novos.
+function freshAge(map, id, max) {
+  const t = map.get(id);
+  if (t == null) return null;
   const a = ago(t);
-  if (a > 700) {
-    freshRows.delete(id);
-    return '';
+  if (a > max) {
+    map.delete(id);
+    return null;
   }
-  return ` fresh" style="animation-delay:-${a}ms`;
+  return a;
+}
+function rowFresh(id) {
+  const a = freshAge(freshRows, id, 700);
+  return a == null ? '' : ` fresh" style="animation-delay:-${a}ms`;
 }
 function nodeHTML(s, ws, reach, lnk, incoming) {
   const g = genOf(s);
@@ -1278,11 +1284,17 @@ function ensureVisible(id) {
   } else requestAnimationFrame(step);
 }
 /* ---------- bursts / shake ---------- */
-function burst(x, y, kind) {
+// Anéis (e, na IA, estilhaços) em x, y. Por padrão em coordenadas do canvas (dentro de #fx);
+// com { fixed: true }, em coordenadas da tela e por cima de tudo (ex.: botões do painel).
+function burst(x, y, kind, { fixed = false } = {}) {
   const b = document.createElement('div');
   b.className = 'burst ' + kind;
   b.style.left = Math.round(x) + 'px';
   b.style.top = Math.round(y) + 'px';
+  if (fixed) {
+    b.style.position = 'fixed';
+    b.style.zIndex = 90;
+  }
   let h = '<span class="ring"></span><span class="ring r2"></span>';
   const ai = kind.includes('ai'),
     mini = kind.includes('mini');
@@ -1296,7 +1308,7 @@ function burst(x, y, kind) {
     h += `<span class="shardwrap" style="transform:rotate(${a}deg)"><span class="shard" style="width:${w}px;animation-duration:${d}ms"></span></span>`;
   }
   b.innerHTML = h;
-  fxEl.appendChild(b);
+  (fixed ? document.body : fxEl).appendChild(b);
   setTimeout(() => b.remove(), 1000);
 }
 function shake() {
@@ -2694,13 +2706,8 @@ const X =
   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M7 7l10 10M17 7L7 17"/></svg>';
 const SPARK13 = () => SPARK.replace('<svg', '<svg style="width:13px;height:13px"');
 function cardFresh(id, src) {
-  const t = freshCards.get(id);
-  if (t == null) return '';
-  const a = ago(t);
-  if (a > 1400) {
-    freshCards.delete(id);
-    return '';
-  }
+  const a = freshAge(freshCards, id, 1400);
+  if (a == null) return '';
   return ` fresh${src === 'ai' ? ' ai' : ''}" style="animation-delay:-${Math.min(a, 500)}ms`;
 }
 const readySprites = (c) => c.sprites.filter((p) => p.img);
@@ -3557,7 +3564,7 @@ function fadeGhost(d, poof) {
   const g = d.g;
   if (poof) {
     const r = g.getBoundingClientRect();
-    screenBurst(r.left + r.width / 2, r.top + r.height / 2, false);
+    burst(r.left + r.width / 2, r.top + r.height / 2, 'plain', { fixed: true });
   }
   g.style.transition = 'opacity .22s,height .22s';
   g.style.opacity = '0';
@@ -3873,22 +3880,11 @@ function marketModal(tab) {
           b.textContent = 'Incluído ✓';
           b.disabled = true;
           const r = b.getBoundingClientRect();
-          screenBurst(r.left + r.width / 2, r.top + r.height / 2);
+          burst(r.left + r.width / 2, r.top + r.height / 2, 'plain', { fixed: true });
         }),
     );
   };
   draw();
-}
-function screenBurst(x, y, ai) {
-  const b = document.createElement('div');
-  b.className = 'burst ' + (ai ? 'ai' : 'plain');
-  b.style.position = 'fixed';
-  b.style.left = x + 'px';
-  b.style.top = y + 'px';
-  b.style.zIndex = 90;
-  b.innerHTML = '<span class="ring"></span><span class="ring r2"></span>';
-  document.body.appendChild(b);
-  setTimeout(() => b.remove(), 900);
 }
 function genCharModal() {
   if (!storyId) return;
