@@ -309,6 +309,9 @@ draftsEl.addEventListener('click', (e) => {
 const charById = (id) => state.characters.find((c) => c.id === id);
 const bgById = (id) => state.backgrounds.find((b) => b.id === id);
 const spriteOf = (c, sid) => c && c.sprites.find((s) => s.id === sid);
+// Personagem na cena sem pose (s ""): fala e conta no elenco, mas não aparece no palco.
+const onStage = (cc) => !!spriteOf(charById(cc.c), cc.s)?.img;
+const NOSPRITE = '/placeholders/no-sprite.svg'; // Health Icons "person", CC0
 const SPARK =
   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l1.9 5.6L19.5 10.5l-5.6 1.9L12 18l-1.9-5.6L4.5 10.5l5.6-1.9z"/></svg>';
 const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -825,9 +828,19 @@ function nodeHTML(s, ws, reach, lnk, incoming) {
   const selC = castSelOf(s),
     selCC = s.chars.find((x) => x.c === selC),
     selCh = selCC && charById(selC);
+  // quem está na cena sem pose não tem o que clicar no palco: escolhe aqui (× tira da cena)
+  const offs = s.chars.filter((x) => !onStage(x) && charById(x.c));
+  const offStage = offs.length
+    ? `<div class="cb-off"><span class="hintsm">fora do palco</span>${offs
+        .map((x) => {
+          const c = charById(x.c);
+          return `<span class="spk-chip off" data-selected="${x.c === selC}" style="--cc:${c.color || 'var(--text)'}"><button data-act="selc" data-v="${c.id}" aria-pressed="${x.c === selC}">${esc(c.name)}</button><button data-act="rmc" data-v="${c.id}" aria-label="Tirar ${esc(c.name)} da cena">×</button></span>`;
+        })
+        .join('')}</div>`
+    : '';
   const cast = selCh
-    ? `<div class="castbar${rowFresh('cast:' + s.id + ':' + selC)}"><div class="cb-head"><span class="cast-name" style="color:${selCh.color || 'inherit'}">${esc(selCh.name)}</span><span class="hintsm">${s.chars.length}/${MAXCH} · solte fora da cena para tirar</span></div><div class="cb-sprites" role="group" aria-label="Sprite de ${esc(selCh.name)}">${selCh.sprites
-        .filter((p) => p.img || p.id === selCC.s)
+    ? `<div class="castbar${rowFresh('cast:' + s.id + ':' + selC)}"><div class="cb-head"><span class="cast-name" style="color:${selCh.color || 'inherit'}">${esc(selCh.name)}</span><span class="hintsm">${s.chars.length}/${MAXCH} · solte fora da cena para tirar</span></div>${offStage}<div class="cb-sprites" role="group" aria-label="Sprite de ${esc(selCh.name)}"><button class="cb-sp none" data-act="sprite" data-c="${selC}" data-v="" aria-pressed="${selCC.s === ''}" title="Sem pose: fala sem aparecer no palco"><img src="${NOSPRITE}" alt="" draggable="false"><span>nenhuma</span></button>${selCh.sprites
+        .filter((p) => p.img)
         .map(
           (p) =>
             `<button class="cb-sp" data-act="sprite" data-c="${selC}" data-v="${p.id}" aria-pressed="${p.id === selCC.s}" title="${esc(p.name)}"><img src="${p.img}" alt="" draggable="false"><span>${esc(p.name)}</span></button>`,
@@ -842,7 +855,7 @@ function nodeHTML(s, ws, reach, lnk, incoming) {
           .map((cc) => {
             const c = charById(cc.c);
             if (!c) return '';
-            return `<button class="spk-chip" data-act="speaker" data-v="${c.id}" aria-pressed="${c.id === s.speaker}" style="--cc:${c.color || 'var(--text)'}"><img src="${spriteOf(c, cc.s)?.img || ''}" alt="" draggable="false">${esc(c.name)}</button>`;
+            return `<button class="spk-chip" data-act="speaker" data-v="${c.id}" aria-pressed="${c.id === s.speaker}" style="--cc:${c.color || 'var(--text)'}"><img src="${spriteOf(c, cc.s)?.img || NOSPRITE}" alt="" draggable="false">${esc(c.name)}</button>`;
           })
           .join('')}</div></div>`
       : '';
@@ -1405,7 +1418,7 @@ function runSuggest(id, srcId, chId) {
     .then((o) => {
       if (gens.get(id) !== g) return; // apagada ou desfeita enquanto gerava
       const chars = o.characters
-        .filter((x) => spriteOf(charById(x.character_id), x.sprite_id))
+        .filter((x) => charById(x.character_id) && (x.sprite_id === '' || spriteOf(charById(x.character_id), x.sprite_id)))
         .map((x) => ({ c: x.character_id, s: x.sprite_id }));
       const speaker =
         o.text_kind === 'dialogue' && chars.some((x) => x.c === o.speaker_character_id)
@@ -1783,6 +1796,16 @@ nodesEl.addEventListener('click', (e) => {
     if (!cc || cc.s === b.dataset.v) return;
     pushUndo();
     cc.s = b.dataset.v;
+    castSel.set(s.id, cc.c);
+    refresh();
+  } else if (a === 'selc') {
+    castSel.set(s.id, b.dataset.v);
+    renderNodes();
+  } else if (a === 'rmc') {
+    pushUndo();
+    materialize(s);
+    s.chars = s.chars.filter((x) => x.c !== b.dataset.v);
+    fixSpeaker(s);
     refresh();
   } else if (a === 'speaker') {
     castSel.set(s.id, b.dataset.v);
@@ -2788,7 +2811,7 @@ function renderCharEd() {
     <div class="field"><span class="lbl">cor do nome · opcional</span><div class="row"><label class="row" style="gap:6px;font-size:12.5px;color:var(--text-2)"><input type="checkbox" data-cf="hascolor"${c.color ? ' checked' : ''}> usar cor</label><input type="color" data-cf="color" value="${c.color || '#f2a541'}"${c.color ? '' : ' disabled'} aria-label="Cor" style="width:34px;height:24px;border:0;background:none;padding:0"></div></div>
     <label class="field"><span class="lbl">descrição</span><textarea class="inp" data-cf="desc" rows="6">${esc(c.desc)}</textarea></label>
     <div class="row"><button class="btn sm" data-pub>Publicar no marketplace</button><button class="btn sm danger" data-cdel>Excluir</button></div></div>
-  <div class="ched-col"><div class="field"><span class="lbl">sprites · emoções</span>${poseButtons(c)}<div class="sprites">${c.sprites.map(spriteRow).join('') || '<div class="empty">Sem sprites. Envie ao menos um para usar este personagem em cenas.</div>'}</div></div></div></div></div>`;
+  <div class="ched-col"><div class="field"><span class="lbl">sprites · emoções</span>${poseButtons(c)}<div class="sprites">${c.sprites.map(spriteRow).join('') || '<div class="empty">Sem sprites. Nas cenas, este personagem pode falar, mas não aparece no palco.</div>'}</div></div></div></div></div>`;
   const b = charEd.querySelector('.ched-body');
   if (b) b.scrollTop = keep;
 }
@@ -2807,7 +2830,7 @@ function renderRail() {
           .map((c) => {
             const o = editChar === c.id;
             const av = readySprites(c)[0];
-            return `<div class="card${o ? ' sel' : ''}${cardFresh(c.id, c.source)}" data-c="${c.id}"><div class="card-row" data-toggle>${av ? `<img class="avatar" src="${esc(av.img)}" alt="">` : c.status === 'failed' ? artOf({ status: 'failed', error: c.error }, 'avatar') : busy(c) || c.sprites.some(busy) ? artOf({ status: 'generating' }, 'avatar') : '<span class="avatar" title="Sem sprites"></span>'}<div style="min-width:0;flex:1"><div class="card-name"><span class="swatch" style="background:${c.color || 'transparent'}"></span><span style="color:${c.color || 'inherit'}">${esc(c.name)}</span></div><div class="card-sub">${charSub(c)}</div></div><span class="chev">${o ? '›' : '+'}</span></div></div>`;
+            return `<div class="card${o ? ' sel' : ''}${cardFresh(c.id, c.source)}" data-c="${c.id}"><div class="card-row" data-toggle>${av ? `<img class="avatar" src="${esc(av.img)}" alt="">` : c.status === 'failed' ? artOf({ status: 'failed', error: c.error }, 'avatar') : busy(c) || c.sprites.some(busy) ? artOf({ status: 'generating' }, 'avatar') : `<img class="avatar nosprite" src="${NOSPRITE}" alt="" title="Sem sprites">`}<div style="min-width:0;flex:1"><div class="card-name"><span class="swatch" style="background:${c.color || 'transparent'}"></span><span style="color:${c.color || 'inherit'}">${esc(c.name)}</span></div><div class="card-sub">${charSub(c)}</div></div><span class="chev">${o ? '›' : '+'}</span></div></div>`;
           })
           .join('')
       : '<div class="empty">Nenhum personagem. Envie sprites, gere com IA ou copie do Marketplace.</div>';
@@ -3237,9 +3260,11 @@ railBody.addEventListener('pointerdown', (e) => {
   if (e.pointerType === 'touch' && !e.target.closest('.avatar,.sprite img')) return; // no toque, o resto do cartão rola o painel
   const c = charById(card.dataset.c);
   const sp = spImg ? spriteOf(c, spImg.closest('[data-sp]').dataset.sp) : readySprites(c)[0];
-  if (!sp || !sp.img) return; // ainda gerando: nada para arrastar
-  const r = (spImg || row.querySelector('.avatar')).getBoundingClientRect();
-  startCharDrag(e, { c: c.id, s: sp.id }, sp.img, {
+  if (spImg && (!sp || !sp.img)) return; // pose ainda gerando: nada para arrastar
+  // sem sprite pronto, entra na cena sem pose (só fala; escolha uma pose depois, se houver)
+  const has = !!(sp && sp.img);
+  const r = (spImg || row.querySelector('.avatar') || row).getBoundingClientRect();
+  startCharDrag(e, { c: c.id, s: has ? sp.id : '' }, has ? sp.img : NOSPRITE, {
     ax: e.clientX,
     ay: e.clientY + r.height * 0.5,
     h: r.height,
