@@ -287,6 +287,33 @@ const esc = (s) =>
     /[&<>"']/g,
     (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c],
   );
+// localStorage pode lançar erro (aba privada, armazenamento bloqueado): leitura que falha devolve
+// o padrão e escrita que falha é ignorada. Os valores são guardados em JSON; os gravados antes
+// como texto puro (ex.: 'ok' das propostas) continuam sendo lidos.
+const store = {
+  get(key, fallback = null) {
+    let raw = null;
+    try {
+      raw = localStorage.getItem(key);
+    } catch (_) {
+      return fallback;
+    }
+    if (raw === null) return fallback;
+    try {
+      return JSON.parse(raw);
+    } catch (_) {
+      return raw;
+    }
+  },
+  set(key, value) {
+    try {
+      localStorage.setItem(key, JSON.stringify(value));
+      return true;
+    } catch (_) {
+      return false;
+    }
+  },
+};
 const scene = (id) => state.scenes.find((s) => s.id === id);
 // Rascunho da proposta do chat aberta no canvas (veja renderDraft): {p, card, plan, t0, view}.
 let draft = null;
@@ -2610,13 +2637,11 @@ $('#btnExport').onclick = async (e) => {
 const appEl = $('.app');
 const mqNarrow = matchMedia('(max-width:900px)');
 const panels = { rail: true, chat: true };
-try {
-  const sv = JSON.parse(localStorage.getItem('vn-panels') || 'null');
-  if (sv) {
-    panels.rail = sv.rail !== false;
-    panels.chat = sv.chat !== false;
-  }
-} catch (_) {}
+const sv = store.get('vn-panels');
+if (sv) {
+  panels.rail = sv.rail !== false;
+  panels.chat = sv.chat !== false;
+}
 function syncToggles() {
   const nr = mqNarrow.matches;
   const rOpen = nr ? $('#rail').classList.contains('open') : panels.rail;
@@ -2635,9 +2660,7 @@ function setPanel(which, open, animate = true) {
   }
   if (panels[which] === open) return;
   panels[which] = open;
-  try {
-    localStorage.setItem('vn-panels', JSON.stringify(panels));
-  } catch (_) {}
+  store.set('vn-panels', panels);
   const anchor = canvas.getBoundingClientRect().left + view.x;
   appEl.classList.toggle(which + '-off', !open);
   syncToggles();
@@ -4497,16 +4520,9 @@ function showDraft(p, card) {
 }
 // Aceita ou recusada fica guardado neste navegador; sem registro, aceita = a história já tem o que ela propõe.
 const PROP_KEY = 'roteiro:proposta:';
-const propMark = (key, v) => {
-  try {
-    localStorage.setItem(PROP_KEY + key, v);
-  } catch (_) {}
-};
+const propMark = (key, v) => store.set(PROP_KEY + key, v);
 function propStatus(p, key) {
-  let v = null;
-  try {
-    v = localStorage.getItem(PROP_KEY + key);
-  } catch (_) {}
+  const v = store.get(PROP_KEY + key);
   if (v) return v;
   if (p.characters?.length)
     return p.characters.every((c) => conn.db.curCharacter.id.find(c.id)) ? 'ok' : null;
@@ -6041,11 +6057,10 @@ $('#btnHelp').onclick = (e) =>
   );
 // Na primeira história aberta neste navegador, os atalhos aparecem uma vez como dica.
 function firstTip() {
-  let seen = true;
-  try {
-    seen = !!localStorage.getItem('roteiro:dica-atalhos');
-    localStorage.setItem('roteiro:dica-atalhos', '1');
-  } catch (_) {}
+  // Sem armazenamento, a dica não aparece: senão ela voltaria a cada visita.
+  const seen = !!store.get('roteiro:dica-atalhos');
+  const saved = store.set('roteiro:dica-atalhos', 1);
+  if (!saved) return;
   if (!seen && !touchUI)
     setTimeout(
       () =>
@@ -6905,11 +6920,8 @@ renderNet();
 requestAnimationFrame(loop);
 startAuth();
 if (touchUI) {
-  let seen = false;
-  try {
-    seen = !!localStorage.getItem('roteiro:dica-toque');
-    localStorage.setItem('roteiro:dica-toque', '1');
-  } catch (_) {}
+  const seen = !!store.get('roteiro:dica-toque');
+  store.set('roteiro:dica-toque', 1);
   if (!seen)
     setTimeout(
       () =>
