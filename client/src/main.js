@@ -4546,7 +4546,7 @@ function continueAfterCharacters(key) {
     });
     if (!ready && performance.now() - t0 < 10_000) return setTimeout(go, 100);
     const message = `(Personagens aceitos: ${ok.map((c) => c.name).join(', ')}. Continue o pedido.) ${next}`;
-    requestAi('chat', { message, context: aiContext(), history: chatHistory() }).catch((err) => {
+    requestAi('chat', chatInput(message)).catch((err) => {
       continued.delete(rowId);
       toast('A IA não recebeu a continuação: ' + aiMessage(err), 'err');
     });
@@ -4678,6 +4678,12 @@ function acceptProposal(p) {
     }
     if (o.op === 'upsert_choice') {
       const c = o.choice;
+      // Alguém ligou a ação a outra cena depois da proposta: aceitar apagaria a ligação dessa pessoa.
+      const cur = f.choices.get(c.id);
+      if (cur && cur.target && c.target && cur.target !== c.target && f.scenes.has(cur.target)) {
+        stale = 'essa ação já foi ligada a outra cena.';
+        break;
+      }
       if (c.sceneId) {
         made.add(c.id);
         if (!f.scenes.has(c.sceneId) && !made.has(c.sceneId)) {
@@ -4761,6 +4767,16 @@ function acceptProposal(p) {
 }
 // Conversa anterior para a IA, mais antiga primeiro, com cada proposta resumida e o que o usuário decidiu.
 const PROP_STATE = { ok: 'aceita', no: 'recusada' };
+// O módulo recusa pedidos com mais de 200 000 caracteres de entrada (request_ai). A conversa
+// mais antiga sai primeiro até o pedido caber; o worker já só usa o fim do histórico.
+const AI_INPUT_MAX = 190_000;
+function chatInput(message) {
+  const input = { message, context: aiContext(), history: chatHistory() };
+  let size = JSON.stringify(input).length;
+  while (input.history.length && size > AI_INPUT_MAX)
+    size -= JSON.stringify(input.history.shift()).length + 1;
+  return input;
+}
 function chatHistory() {
   return [...conn.db.myChatMessage.iter()]
     .sort(
@@ -4792,7 +4808,7 @@ $('#chatForm').onsubmit = (e) => {
   }
   const btn = $('#chatForm button[type=submit]');
   btn.disabled = true;
-  requestAi('chat', { message: t, context: aiContext(), history: chatHistory() })
+  requestAi('chat', chatInput(t))
     .then(
       () => {
         $('#chatInput').value = '';
